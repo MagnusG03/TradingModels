@@ -7,19 +7,19 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.layers import LSTM, Dense, Input
 from tensorflow.keras.callbacks import EarlyStopping
 
-# Set the date range for the last 700 days
+# Set the date range for the last 10 years
 end_date = datetime.datetime.today()
-start_date = end_date - datetime.timedelta(days=700)
+start_date = end_date - datetime.timedelta(days=365 * 23)
 
-# Download historical gold prices
+# Download historical gold prices using daily data
 gold_data = yf.download(
     'GC=F',
     start=start_date.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='1h'
+    interval='1d'  # Daily interval
 )
 gold_data.reset_index(inplace=True)
 
@@ -65,21 +65,30 @@ X_test_lstm = np.reshape(X_test.values, (X_test.shape[0], 1, X_test.shape[1]))
 # Build and train the LSTM model
 early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
 model = Sequential()
-model.add(LSTM(50, return_sequences=True, input_shape=(1, X_train.shape[1])))
+model.add(Input(shape=(1, X_train.shape[1])))
+model.add(LSTM(50, return_sequences=True))
 model.add(LSTM(50))
 model.add(Dense(1))
 model.compile(optimizer='adam', loss='mean_squared_error')
-model.fit(X_train_lstm, y_train, epochs=50, batch_size=32, validation_split=0.01, callbacks=[early_stop])
+model.fit(
+    X_train_lstm, y_train,
+    epochs=50,
+    batch_size=32,
+    validation_split=0.01,
+    callbacks=[early_stop]
+)
 
 # Make predictions and inverse scaling
 predictions = model.predict(X_test_lstm)
 col_idx = X_test.columns.get_loc('Close')
 
+# Inverse transform predictions
 predictions_full = X_test.copy()
 predictions_full.iloc[:, col_idx] = predictions.flatten()
 predictions_inv_full = scaler.inverse_transform(predictions_full)
 predictions_inv = predictions_inv_full[:, col_idx]
 
+# Inverse transform y_test
 y_test_full = X_test.copy()
 y_test_full.iloc[:, col_idx] = y_test.values
 y_test_inv_full = scaler.inverse_transform(y_test_full)
@@ -87,6 +96,10 @@ y_test_inv = y_test_inv_full[:, col_idx]
 
 predictions_inv = predictions_inv.reshape(-1)
 y_test_inv = y_test_inv.reshape(-1)
+
+# Inverse transform X_test to get current 'Close' prices
+X_test_inv_full = scaler.inverse_transform(X_test)
+X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test.index)
 
 # Calculate RMSE
 rmse = np.sqrt(mean_squared_error(y_test_inv, predictions_inv))
@@ -96,7 +109,7 @@ print(f'Root Mean Squared Error: {rmse}')
 signals = []
 for i in range(len(predictions_inv)):
     predicted_price = predictions_inv[i]
-    current_close = X_test['Close'].values[i]
+    current_close = X_test_inv_full.iloc[i]['Close']
     if predicted_price > current_close:
         signals.append(1)  # Buy
     else:
