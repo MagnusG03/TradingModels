@@ -3,24 +3,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import yfinance as yf
 import datetime
-
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 from sklearn.preprocessing import MinMaxScaler
 from collections import deque
 import random
+import os
 
 # Set the date range for the last 700 days
 end_date = datetime.datetime.today()
-start_date = end_date - datetime.timedelta(days=700)
+start_date = end_date - datetime.timedelta(days=3)
 
 # Download historical gold prices
 gold_data = yf.download(
     'GC=F',  # Gold futures symbol
     start=start_date.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='1h'  # 1-hour intervals
+    interval='2m'  # 1-hour intervals
 )
 gold_data.reset_index(inplace=True)
 
@@ -109,6 +109,8 @@ class TradingEnv:
     def step(self, action):
         # Execute one time step within the environment
         current_price = self.data.loc[self.current_step, 'Close']
+        if current_price <= 1e-8:
+            current_price = 1e-8
         done = False
 
         # Execute action
@@ -159,8 +161,8 @@ class ReplayBuffer:
 # Build the Deep Q-Network model
 def build_model(state_size, action_size):
     model = keras.Sequential([
-        layers.Dense(128, input_dim=state_size, activation='relu'),
-        layers.Dense(128, activation='relu'),
+        layers.Dense(64, input_dim=state_size, activation='relu'),
+        layers.Dense(64, activation='relu'),
         layers.Dense(action_size, activation='linear')  # Output layer with linear activation
     ])
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3), loss='mse')
@@ -229,6 +231,9 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
+# Paths to save and load the model
+model_path = 'dqn_trading_2m_model.keras'
+
 # Create training and evaluation environments
 train_size = int(len(gold_data) * 0.8)
 train_data = gold_data[:train_size]
@@ -240,11 +245,22 @@ eval_env = TradingEnv(eval_data)
 state_size = train_env.state_size
 action_size = len(train_env.action_space)
 
-agent = DQNAgent(state_size, action_size)
+# Load or initialize the agent
+if os.path.exists(model_path):
+    print("Loading saved model...")
+    agent = DQNAgent(state_size, action_size)
+    agent.model = keras.models.load_model(model_path)
+    agent.update_target_model()
+else:
+    print("No saved model found. Initializing a new agent.")
+    agent = DQNAgent(state_size, action_size)
 
 # Training the agent
 num_episodes = 50  # Number of episodes for training
 update_target_frequency = 5  # Update target network every 5 episodes
+reward_threshold = 1000  # Define the reward threshold for saving the model
+
+best_reward = -float('inf')  # Initialize best reward
 
 for e in range(num_episodes):
     state = train_env.reset()
@@ -270,10 +286,17 @@ for e in range(num_episodes):
 
     print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
 
+    # Save the model if the total reward is greater than the threshold and best_reward
+    if total_reward > reward_threshold and total_reward > best_reward:
+        agent.model.save(model_path)
+        best_reward = total_reward  # Update the best reward
+        print(f"Model saved successfully with reward: {total_reward:.2f}")
+
 # Test the trained agent
 state = eval_env.reset()
 done = False
 net_worths = []
+
 while not done:
     action = agent.act(state)
     next_state, reward, done = eval_env.step(action)
