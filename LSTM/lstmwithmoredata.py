@@ -12,8 +12,8 @@ from tensorflow.keras.callbacks import EarlyStopping
 # Set the date ranges
 end_date = datetime.datetime.today()
 start_date_daily = end_date - datetime.timedelta(days=365 * 23)  # 23 years
-start_date_hourly = end_date - datetime.timedelta(days=720)      # 720 days
-start_date_2min = end_date - datetime.timedelta(days=60)         # 60 days
+start_date_hourly = end_date - datetime.timedelta(days=719)      # 720 days
+start_date_2min = end_date - datetime.timedelta(days=59)         # 60 days
 
 # Download daily data
 daily_data = yf.download(
