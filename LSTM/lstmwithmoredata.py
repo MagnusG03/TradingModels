@@ -6,16 +6,16 @@ import datetime
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import LSTM, Dense, Input
+from tensorflow.keras.layers import LSTM, Dense, Input, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
 
 # Set the date ranges
 end_date = datetime.datetime.today()
 start_date_daily = end_date - datetime.timedelta(days=365 * 23)  # 23 years
-start_date_hourly = end_date - datetime.timedelta(days=719)      # 720 days
-start_date_2min = end_date - datetime.timedelta(days=59)         # 60 days
+start_date_hourly = end_date - datetime.timedelta(days=720)      # 720 days
+start_date_2min = end_date - datetime.timedelta(days=60)         # 60 days
 
-# Download daily data
+# Download daily data for Natural Gas
 daily_data = yf.download(
     'CL=F',
     start=start_date_daily.strftime('%Y-%m-%d'),
@@ -28,7 +28,7 @@ if isinstance(daily_data.columns, pd.MultiIndex):
 daily_data.reset_index(inplace=True)
 daily_data.set_index('Date', inplace=True)
 
-# Download hourly data
+# Download hourly data for Natural Gas
 hourly_data = yf.download(
     'CL=F',
     start=start_date_hourly.strftime('%Y-%m-%d'),
@@ -46,9 +46,9 @@ elif 'Date' in hourly_data.columns:
 else:
     print("Datetime column not found in hourly_data.")
 
-# Download 2-minute data
+# Download 2-minute data for Natural Gas
 data_2min = yf.download(
-    'L=F',
+    'CL=F',
     start=start_date_2min.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='2m'
@@ -66,7 +66,6 @@ else:
 
 # Function to aggregate higher-frequency data
 def aggregate_data(high_freq_data, freq):
-    # Identify available columns
     available_cols = high_freq_data.columns.tolist()
     agg_dict = {}
     if 'Open' in available_cols:
@@ -82,11 +81,9 @@ def aggregate_data(high_freq_data, freq):
 
     if not agg_dict:
         print(f"No columns to aggregate in data with frequency {freq}")
-        return pd.DataFrame()  # Return empty DataFrame if no columns
+        return pd.DataFrame()
 
-    # Resample to the specified frequency
     agg_data = high_freq_data.resample(freq).agg(agg_dict)
-    # Handle missing values
     agg_data.dropna(subset=['Close'], inplace=True)
     return agg_data
 
@@ -132,7 +129,6 @@ daily_data.set_index('Date', inplace=True)
 daily_data['Volatility_hourly'].fillna(method='ffill', inplace=True)
 daily_data['Volatility_2min'].fillna(method='ffill', inplace=True)
 
-# Handle missing values and ensure data types are correct
 daily_data.ffill(inplace=True)
 daily_data['Close'] = daily_data['Close'].astype(float)
 
@@ -147,16 +143,13 @@ loss = -delta.where(delta < 0, 0).rolling(window=window_length).mean()
 rs = gain / loss
 daily_data['RSI'] = 100 - (100 / (1 + rs))
 
-# Fill NaN values
 daily_data.fillna(0, inplace=True)
 
 # Features and target variable
 features = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA50', 'RSI', 'Volatility_hourly', 'Volatility_2min']
-# Check for missing columns in features
 missing_features = [feat for feat in features if feat not in daily_data.columns]
 if missing_features:
     print(f"Missing features in daily_data: {missing_features}")
-    # Remove missing features from the list
     features = [feat for feat in features if feat in daily_data.columns]
 
 scaler = MinMaxScaler(feature_range=(0, 1))
@@ -169,15 +162,14 @@ y = daily_data['Close'].shift(-1)
 X = X[:-1]
 y = y[:-1]
 
-# Use a sliding window approach
-def create_sequences(X, y, time_steps=5):
+def create_sequences(X, y, time_steps=10):
     Xs, ys = [], []
     for i in range(len(X) - time_steps):
         Xs.append(X.iloc[i:(i + time_steps)].values)
         ys.append(y.iloc[i + time_steps])
     return np.array(Xs), np.array(ys)
 
-time_steps = 5
+time_steps = 10
 X_seq, y_seq = create_sequences(X, y, time_steps)
 
 # Split the data
@@ -189,13 +181,15 @@ y_train, y_test = y_seq[:split], y_seq[split:]
 early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 model = Sequential()
 model.add(Input(shape=(time_steps, X_train.shape[2])))
-model.add(LSTM(64, return_sequences=True))
-model.add(LSTM(32))
+model.add(LSTM(128, return_sequences=True))
+model.add(Dropout(0.2))
+model.add(LSTM(64))
+model.add(Dropout(0.2))
 model.add(Dense(1))
 model.compile(optimizer='adam', loss='mean_squared_error')
-history = model.fit(
+model.fit(
     X_train, y_train,
-    epochs=1000,
+    epochs=500,
     batch_size=32,
     validation_split=0.1,
     callbacks=[early_stop]
@@ -203,7 +197,6 @@ history = model.fit(
 
 # Make predictions and inverse scaling
 predictions = model.predict(X_test)
-# We need to inverse scale the predictions and y_test
 X_test_flat = X.iloc[-len(y_test):]
 col_idx = X_test_flat.columns.get_loc('Close')
 
@@ -211,21 +204,18 @@ col_idx = X_test_flat.columns.get_loc('Close')
 predictions_full = X_test_flat.copy()
 predictions_full.iloc[:, col_idx] = predictions.flatten()
 predictions_inv_full = scaler.inverse_transform(predictions_full)
-# Convert to DataFrame
 predictions_inv_full = pd.DataFrame(predictions_inv_full, columns=features, index=X_test_flat.index)
 predictions_inv = predictions_inv_full['Close']
 
 y_test_full = X_test_flat.copy()
 y_test_full.iloc[:, col_idx] = y_test
 y_test_inv_full = scaler.inverse_transform(y_test_full)
-# Convert to DataFrame
 y_test_inv_full = pd.DataFrame(y_test_inv_full, columns=features, index=X_test_flat.index)
 y_test_inv = y_test_inv_full['Close']
 
 predictions_inv = predictions_inv.values.reshape(-1)
 y_test_inv = y_test_inv.values.reshape(-1)
 
-# Inverse transform X_test_flat to get current 'Close' prices
 X_test_inv_full = scaler.inverse_transform(X_test_flat)
 X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test_flat.index)
 
@@ -233,15 +223,17 @@ X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test_f
 rmse = np.sqrt(mean_squared_error(y_test_inv, predictions_inv))
 print(f'Root Mean Squared Error: {rmse}')
 
-# Generate buy and sell signals
+# Generate buy and sell signals with a more aggressive threshold to encourage buying and selling
 signals = []
 for i in range(len(predictions_inv)):
-    predicted_price = predictions_inv[i]
-    current_close = X_test_inv_full.iloc[i]['Close']
-    if predicted_price > current_close:
+    if predictions_inv[i] > X_test_inv_full.iloc[i]['Close'] * 1.15:
+        signals.append(2)  # Strong Buy
+    elif predictions_inv[i] > X_test_inv_full.iloc[i]['Close']:
         signals.append(1)  # Buy
+    elif predictions_inv[i] < X_test_inv_full.iloc[i]['Close'] * 0.96:
+        signals.append(-1)  # Strong Sell
     else:
-        signals.append(0)  # Sell
+        signals.append(0)  # Hold
 
 # Backtest the strategy
 investment = 10000
@@ -250,11 +242,17 @@ portfolio = []
 
 for i in range(len(signals)):
     price = y_test_inv[i]
-    if signals[i] == 1 and investment >= price:
+    if signals[i] == 2:  # Strong Buy
+        units = (investment // price) * 2  # Double the usual buy amount
+        if units > 0:
+            investment -= units * price
+            positions += units
+    elif signals[i] == 1:  # Buy
         units = investment // price  # Buy as many units as possible
-        investment -= units * price
-        positions += units
-    elif signals[i] == 0 and positions > 0:
+        if units > 0:
+            investment -= units * price
+            positions += units
+    elif signals[i] == -1 and positions > 0:  # Strong Sell
         investment += positions * price
         positions = 0
     portfolio.append(investment + positions * price)
@@ -283,3 +281,8 @@ plt.xlabel('Date')
 plt.ylabel('Profit/Loss ($)')
 plt.legend()
 plt.show()
+
+# Print final values for both strategies
+print(f'Final Model Portfolio Value: {portfolio[-1]}')
+print(f'Final Buy and Hold Portfolio Value: {buy_hold_portfolio[-1]}')
+
