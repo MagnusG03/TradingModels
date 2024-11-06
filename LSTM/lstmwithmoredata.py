@@ -1,3 +1,6 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow info and warning messages
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,10 +15,10 @@ from tensorflow.keras.callbacks import EarlyStopping
 # Set the date ranges
 end_date = datetime.datetime.today()
 start_date_daily = end_date - datetime.timedelta(days=365 * 23)  # 23 years
-start_date_hourly = end_date - datetime.timedelta(days=720)      # 720 days
-start_date_2min = end_date - datetime.timedelta(days=60)         # 60 days
+start_date_hourly = end_date - datetime.timedelta(days=719)      # 719 days
+start_date_2min = end_date - datetime.timedelta(days=59)         # 59 days
 
-# Download daily data for Natural Gas
+# Download daily data
 daily_data = yf.download(
     'CL=F',
     start=start_date_daily.strftime('%Y-%m-%d'),
@@ -28,7 +31,7 @@ if isinstance(daily_data.columns, pd.MultiIndex):
 daily_data.reset_index(inplace=True)
 daily_data.set_index('Date', inplace=True)
 
-# Download hourly data for Natural Gas
+# Download hourly data
 hourly_data = yf.download(
     'CL=F',
     start=start_date_hourly.strftime('%Y-%m-%d'),
@@ -46,7 +49,7 @@ elif 'Date' in hourly_data.columns:
 else:
     print("Datetime column not found in hourly_data.")
 
-# Download 2-minute data for Natural Gas
+# Download 2-minute data
 data_2min = yf.download(
     'CL=F',
     start=start_date_2min.strftime('%Y-%m-%d'),
@@ -126,10 +129,10 @@ daily_data = daily_data.merge(volatility_2min, on='Date', how='left')
 daily_data.set_index('Date', inplace=True)
 
 # Fill missing volatility values
-daily_data['Volatility_hourly'].fillna(method='ffill', inplace=True)
-daily_data['Volatility_2min'].fillna(method='ffill', inplace=True)
+daily_data['Volatility_hourly'] = daily_data['Volatility_hourly'].ffill()
+daily_data['Volatility_2min'] = daily_data['Volatility_2min'].ffill()
 
-daily_data.ffill(inplace=True)
+daily_data = daily_data.ffill()
 daily_data['Close'] = daily_data['Close'].astype(float)
 
 # Calculate moving averages and RSI
@@ -178,7 +181,7 @@ X_train, X_test = X_seq[:split], X_seq[split:]
 y_train, y_test = y_seq[:split], y_seq[split:]
 
 # Build and train the LSTM model
-early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
 model = Sequential()
 model.add(Input(shape=(time_steps, X_train.shape[2])))
 model.add(LSTM(128, return_sequences=True))
@@ -235,27 +238,22 @@ for i in range(len(predictions_inv)):
     else:
         signals.append(0)  # Hold
 
-# Backtest the strategy
 investment = 10000
 positions = 0
 portfolio = []
 
 for i in range(len(signals)):
     price = y_test_inv[i]
-    if signals[i] == 2:  # Strong Buy
-        units = (investment // price) * 2  # Double the usual buy amount
-        if units > 0:
-            investment -= units * price
-            positions += units
-    elif signals[i] == 1:  # Buy
-        units = investment // price  # Buy as many units as possible
+    if (signals[i] == 2 or signals[i] == 1) and investment >= price:  # Buy signals
+        units = investment // price
         if units > 0:
             investment -= units * price
             positions += units
     elif signals[i] == -1 and positions > 0:  # Strong Sell
         investment += positions * price
         positions = 0
-    portfolio.append(investment + positions * price)
+    portfolio_value = investment + positions * price
+    portfolio.append(portfolio_value)
 
 # Buy-and-hold strategy
 initial_price = y_test_inv[0]
@@ -285,4 +283,3 @@ plt.show()
 # Print final values for both strategies
 print(f'Final Model Portfolio Value: {portfolio[-1]}')
 print(f'Final Buy and Hold Portfolio Value: {buy_hold_portfolio[-1]}')
-
