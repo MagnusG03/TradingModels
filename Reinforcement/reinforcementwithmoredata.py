@@ -131,8 +131,8 @@ daily_data = daily_data.merge(volatility_2min, on='Date', how='left')
 daily_data.set_index('Date', inplace=True)
 
 # Fill missing volatility values
-daily_data['Volatility_hourly'] = daily_data['Volatility_hourly'].fillna(method='ffill')
-daily_data['Volatility_2min'] = daily_data['Volatility_2min'].fillna(method='ffill')
+daily_data['Volatility_hourly'] = daily_data['Volatility_hourly'].ffill()
+daily_data['Volatility_2min'] = daily_data['Volatility_2min'].ffill()
 
 # Handle missing values and ensure data types are correct
 daily_data.ffill(inplace=True)
@@ -217,10 +217,10 @@ class TradingEnv:
         # Execute action
         if action == 1:  # Buy
             # Buy as many shares as possible with available balance
-            shares_to_buy = self.balance // (current_price * 100)
+            shares_to_buy = self.balance // current_price
             if shares_to_buy > 0:
-                self.balance -= shares_to_buy * current_price * 100
-                self.shares_held += shares_to_buy * 100
+                self.balance -= shares_to_buy * current_price
+                self.shares_held += shares_to_buy
         elif action == 2:  # Sell
             # Sell all shares held
             if self.shares_held > 0:
@@ -303,35 +303,34 @@ class DQNAgent:
         self.memory.add((state, action, reward, next_state, done))
 
     def replay(self):
-        # Train the model using experiences from the replay buffer
-        if len(self.memory) < self.batch_size:
-            return  # Not enough samples to train
+        try:
+            # Train the model using experiences from the replay buffer
+            if len(self.memory) < self.batch_size:
+                return  # Not enough samples to train
 
-        minibatch = self.memory.sample(self.batch_size)
-        states = np.array([e[0] for e in minibatch])
-        actions = np.array([e[1] for e in minibatch])
-        rewards = np.array([e[2] for e in minibatch])
-        next_states = np.array([e[3] for e in minibatch])
-        dones = np.array([e[4] for e in minibatch])
+            minibatch = self.memory.sample(self.batch_size)
+            states = np.array([e[0] for e in minibatch])
+            actions = np.array([e[1] for e in minibatch])
+            rewards = np.array([e[2] for e in minibatch])
+            next_states = np.array([e[3] for e in minibatch])
+            dones = np.array([e[4] for e in minibatch])
 
-        # Predict Q-values for current states
-        target = self.model.predict(states, verbose=0)
-        # Predict Q-values for next states using target network
-        target_next = self.target_model.predict(next_states, verbose=0)
+            # Predict Q-values for current states
+            target = self.model.predict(states, verbose=0)
+            # Predict Q-values for next states using target network
+            target_next = self.target_model.predict(next_states, verbose=0)
 
-        for i in range(self.batch_size):
-            if dones[i]:
-                target[i][actions[i]] = rewards[i]
-            else:
-                # Q-learning update rule
-                target[i][actions[i]] = rewards[i] + self.gamma * np.amax(target_next[i])
+            for i in range(self.batch_size):
+                if dones[i]:
+                    target[i][actions[i]] = rewards[i]
+                else:
+                    # Q-learning update rule
+                    target[i][actions[i]] = rewards[i] + self.gamma * np.amax(target_next[i])
 
-        # Train the model
-        self.model.fit(states, target, epochs=1, verbose=0)
-
-        # Decay exploration rate epsilon
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
+            # Train the model
+            self.model.fit(states, target, epochs=1, verbose=0)
+        except Exception as e:
+            print(f"An error occurred during replay: {e}")
 
 # Paths to save and load the model
 model_path = 'dqn_trading_daily_model.keras'
@@ -353,12 +352,29 @@ model_exists = os.path.exists(model_path)
 # Load or initialize the agent
 if model_exists:
     print("Loading saved model...")
-    agent = DQNAgent(state_size, action_size)
-    agent.model = keras.models.load_model(model_path)
-    agent.update_target_model()
+    try:
+        agent = DQNAgent(state_size, action_size)
+        agent.model = keras.models.load_model(model_path)
+        agent.update_target_model()
+    except Exception as e:
+        print(f"An error occurred while loading the model: {e}")
 else:
     print("No saved model found. Initializing a new agent.")
     agent = DQNAgent(state_size, action_size)
+
+# Validate data integrity
+print(f"Total data length: {len(data)}")
+print(f"Training data length: {len(train_data)}")
+print(f"Evaluation data length: {len(eval_data)}")
+
+# Select only numeric columns
+numeric_cols = data.select_dtypes(include=[np.number]).columns
+
+# Check for NaN or Inf values in numeric data
+if data[numeric_cols].isnull().values.any():
+    print("Data contains NaN values.")
+if np.isinf(data[numeric_cols].values).any():
+    print("Data contains infinite values.")
 
 # Only train if the model does not exist
 if not model_exists:
@@ -371,44 +387,54 @@ if not model_exists:
     patience = 20  # Number of episodes to wait before early stopping
     episodes_without_improvement = 0
 
-    for e in range(num_episodes):
-        state = train_env.reset()
-        total_reward = 0
-        done = False
+    try:
+        for e in range(num_episodes):
+            state = train_env.reset()
+            total_reward = 0
+            done = False
 
-        while not done:
-            # Agent takes action
-            action = agent.act(state)
-            # Environment responds with next state, reward, and done flag
-            next_state, reward, done = train_env.step(action)
-            # Remember the experience
-            agent.remember(state, action, reward, next_state, done)
-            state = next_state
-            total_reward += reward
+            while not done:
+                # Agent takes action
+                action = agent.act(state)
+                # Environment responds with next state, reward, and done flag
+                next_state, reward, done = train_env.step(action)
+                # Remember the experience
+                agent.remember(state, action, reward, next_state, done)
+                state = next_state
+                total_reward += reward
 
-            # Agent learns from the experience
-            agent.replay()
+                # Agent learns from the experience
+                agent.replay()
 
-        # Update target network
-        if e % update_target_frequency == 0:
-            agent.update_target_model()
+                # Optional: Log step information
+                # print(f"Step info - State: {state}, Action: {action}, Reward: {reward}, Done: {done}")
 
-        print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.4f}")
+            # Update target network
+            if e % update_target_frequency == 0:
+                agent.update_target_model()
 
-        # Check for improvement
-        if total_reward > best_reward:
-            best_reward = total_reward
-            episodes_without_improvement = 0
-            # Save the model if total reward has improved
-            agent.model.save(model_path)
-            print(f"Model saved successfully with reward: {total_reward:.4f}")
-        else:
-            episodes_without_improvement += 1
+            # Decay exploration rate epsilon
+            if agent.epsilon > agent.epsilon_min:
+                agent.epsilon *= agent.epsilon_decay
 
-        # Early stopping
-        if episodes_without_improvement >= patience:
-            print(f"No improvement for {patience} episodes. Early stopping.")
-            break
+            print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.4f}")
+
+            # Check for improvement
+            if total_reward > best_reward:
+                best_reward = total_reward
+                episodes_without_improvement = 0
+                # Save the model if total reward has improved
+                agent.model.save(model_path)
+                print(f"Model saved successfully with reward: {total_reward:.4f}")
+            else:
+                episodes_without_improvement += 1
+
+            # Early stopping
+            if episodes_without_improvement >= patience:
+                print(f"No improvement for {patience} episodes. Early stopping.")
+                break
+    except Exception as e:
+        print(f"An error occurred during training: {e}")
 
 # Test the trained agent
 state = eval_env.reset()
