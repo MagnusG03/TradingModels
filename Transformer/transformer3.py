@@ -488,7 +488,7 @@ print(buy_hold_portfolio[:5])
 investment = initial_investment
 positions = 0.0
 portfolio = []
-transaction_fee = 0.0
+transaction_fee = 0.01
 
 print("\nStarting Trading Simulation...\n")
 
