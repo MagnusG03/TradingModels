@@ -14,8 +14,8 @@ from tensorflow.keras.layers import (
     GlobalAveragePooling1D, Layer
 )
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-from tensorflow.keras.optimizers import AdamW
-#from tensorflow_addons.optimizers import AdamW  # Import from tensorflow_addons
+# from tensorflow.keras.optimizers import AdamW # Import from tensorflow.keras
+from tensorflow_addons.optimizers import AdamW  # Import from tensorflow_addons
 from tensorflow.keras import Sequential
 import tensorflow as tf
 from tensorflow.keras.losses import Huber, MeanSquaredError
@@ -29,11 +29,11 @@ tf.random.set_seed(42)
 end_date = datetime.datetime.today()
 start_date_daily = end_date - datetime.timedelta(days=365 * 23)  # 23 years
 start_date_hourly = end_date - datetime.timedelta(days=719)      # 719 days
-start_date_2min = end_date - datetime.timedelta(days=59)         # 59 days
+start_date_2min = end_date - datetime.timedelta(days=58)         # 58 days
 
 # Download daily data
 daily_data = yf.download(
-    'CL=F',
+    '^HSI',
     start=start_date_daily.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='1d',
@@ -47,7 +47,7 @@ daily_data.set_index('Date', inplace=True)
 
 # Download hourly data
 hourly_data = yf.download(
-    'CL=F',
+    '^HSI',
     start=start_date_hourly.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='1h',
@@ -66,7 +66,7 @@ else:
 
 # Download 2-minute data
 data_2min = yf.download(
-    'CL=F',
+    '^HSI',
     start=start_date_2min.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='2m',
@@ -148,18 +148,18 @@ daily_data.set_index('Date', inplace=True)
 daily_data['Volatility_hourly'] = daily_data['Volatility_hourly'].ffill()
 daily_data['Volatility_2min'] = daily_data['Volatility_2min'].ffill()
 
-# **Håndtere Negative 'Close'-Verdier med Forward Fill**
-# 1. Identifiser negative eller null 'Close'-verdier
+# **Handle Negative 'Close' Values with Forward Fill**
+# 1. Identify negative or zero 'Close' values
 negative_close_mask = daily_data['Close'] <= 0
-print(f"Antall dager med negative eller null 'Close': {negative_close_mask.sum()}")
+print(f"Number of days with negative or zero 'Close': {negative_close_mask.sum()}")
 
-# 2. Erstatt negative 'Close' verdier med NaN for å bruke ffill
+# 2. Replace negative 'Close' values with NaN to use ffill
 daily_data.loc[negative_close_mask, 'Close'] = np.nan
 
-# 3. Bruk forward fill og backfill for å erstatte NaN med forrige gyldige 'Close' verdi
+# 3. Use forward fill and backfill to replace NaN with the previous valid 'Close' value
 daily_data['Close'] = daily_data['Close'].ffill().bfill()
 
-# Fyll andre manglende verdier
+# Fill other missing values
 daily_data = daily_data.ffill()
 
 # Convert 'Close' to float
@@ -191,7 +191,7 @@ daily_data['Signal_Line'] = daily_data['MACD'].ewm(span=9, adjust=False).mean()
 for lag in range(1, 4):
     daily_data[f'Close_lag_{lag}'] = daily_data['Close'].shift(lag)
 
-# Legg til flere tekniske indikatorer
+# Add more technical indicators
 daily_data['ATR'] = daily_data['Close'].rolling(window=14).apply(lambda x: np.mean(np.abs(x - x.shift(1))), raw=False)
 low_min = daily_data['Low'].rolling(window=14).min()
 high_max = daily_data['High'].rolling(window=14).max()
@@ -199,18 +199,18 @@ daily_data['Stochastic'] = 100 * ((daily_data['Close'] - low_min) / (high_max - 
 daily_data['OBV'] = (np.sign(daily_data['Close'].diff()) * daily_data['Volume']).fillna(0).cumsum()
 
 # Add more lagged features
-for feature in ['Open', 'High', 'Low', 'Volume', 'MA10', 'MA20', 'MA50', 'RSI', 
+for feature in ['Open', 'High', 'Low', 'Volume', 'MA10', 'MA20', 'MA50', 'RSI',
                 'Volatility_hourly', 'Volatility_2min', 'BB_upper', 'BB_lower',
                 'MACD', 'Signal_Line', 'ATR', 'Stochastic', 'OBV']:
     for lag in range(1, 4):
         daily_data[f'{feature}_lag_{lag}'] = daily_data[feature].shift(lag)
 
-# Fyll manglende verdier
+# Fill missing values
 daily_data.bfill(inplace=True)
 
-# **Initial Investering Separat for Buy-and-Hold**
+# **Initial Investment Separately for Buy-and-Hold**
 initial_investment = 10000.0
-investment = initial_investment  # For trading-simuleringen
+investment = initial_investment  # For trading simulation
 
 # Features and target variable
 features = [
@@ -253,17 +253,20 @@ y_scaled = target_scaler.fit_transform(daily_data[['Close']])
 X = pd.DataFrame(X_scaled, columns=features, index=daily_data.index)
 y = pd.Series(y_scaled.flatten(), index=daily_data.index)
 
-# Shift target variable to predict next day's close
-y = y.shift(-1)
-X = X[:-1]
-y = y[:-1]
+# Set the prediction horizon
+prediction_horizon = 10  # Predict 10 days ahead
+
+# Shift the target variable to predict N days ahead
+y = y.shift(-prediction_horizon)
+X = X[:-prediction_horizon]
+y = y[:-prediction_horizon]
 
 def create_sequences(X, y, time_steps=30):
     Xs, ys, indices = [], [], []
     for i in range(len(X) - time_steps):
         Xs.append(X.iloc[i:(i + time_steps)].values)
-        ys.append(y.iloc[i + time_steps])
-        indices.append(y.index[i + time_steps])
+        ys.append(y.iloc[i + time_steps - 1])  # Adjusted index
+        indices.append(y.index[i + time_steps - 1])
     return np.array(Xs), np.array(ys), indices
 
 time_steps = 30  # Increased sequence length
@@ -275,10 +278,17 @@ X_train, X_test = X_seq[:split], X_seq[split:]
 y_train, y_test = y_seq[:split], y_seq[split:]
 indices_train, indices_test = y_indices[:split], y_indices[split:]
 
-# Build and train the Transformer model
+# Model parameters
+embed_dim = X_train.shape[2]  # Embedding size for each token
+num_heads = 12  # Number of attention heads
+ff_dim = 512  # Feed-forward network dimension
+num_layers = 4  # Number of Transformer blocks
+time_steps = X_train.shape[1]  # Should be 30 based on your sequence length
+
+# Define custom layers
 class TransformerBlock(Layer):
-    def __init__(self, embed_dim, num_heads, ff_dim, rate=0.2):
-        super(TransformerBlock, self).__init__()
+    def __init__(self, embed_dim, num_heads, ff_dim, rate=0.2, **kwargs):
+        super(TransformerBlock, self).__init__(**kwargs)
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.ff_dim = ff_dim
@@ -313,8 +323,8 @@ class TransformerBlock(Layer):
         return config
 
 class PositionalEncoding(Layer):
-    def __init__(self, position, d_model):
-        super(PositionalEncoding, self).__init__()
+    def __init__(self, position, d_model, **kwargs):
+        super(PositionalEncoding, self).__init__(**kwargs)
         self.position = position
         self.d_model = d_model
         self.pos_encoding = self.positional_encoding(position, d_model)
@@ -356,44 +366,49 @@ class PositionalEncoding(Layer):
         seq_len = tf.shape(inputs)[1]
         return inputs + self.pos_encoding[:, :seq_len, :]
 
-# Modellparametere
-embed_dim = X_train.shape[2]  # Embedding size for each token
-num_heads = 12  # Number of attention heads
-ff_dim = 512  # Feed-forward network dimension
-num_layers = 4  # Number of Transformer blocks
-time_steps = X_train.shape[1]  # Should be 30 based on your sequence length
+# Check if the model file exists
+if os.path.exists('best_model.keras'):
+    print("Model file exists. Loading model...")
+    from tensorflow.keras.models import load_model
+    model = tf.keras.models.load_model(
+        'best_model.keras', 
+        custom_objects={'TransformerBlock': TransformerBlock, 'PositionalEncoding': PositionalEncoding}
+    )
+    history = None  # No training history
+else:
+    print("Model file not found. Building and training the model...")
+    # Build the model
+    inputs = Input(shape=(time_steps, embed_dim))
+    x = PositionalEncoding(time_steps, embed_dim)(inputs)
+    x = LayerNormalization(epsilon=1e-6)(x)  # Optional: LayerNorm after Positional Encoding
 
-inputs = Input(shape=(time_steps, embed_dim))
-x = PositionalEncoding(time_steps, embed_dim)(inputs)
-x = LayerNormalization(epsilon=1e-6)(x)  # Optional: LayerNorm after Positional Encoding
+    for _ in range(num_layers):
+        x = TransformerBlock(embed_dim=embed_dim, num_heads=num_heads, ff_dim=ff_dim, rate=0.3)(x)  # Increased dropout rate
 
-for _ in range(num_layers):
-    x = TransformerBlock(embed_dim=embed_dim, num_heads=num_heads, ff_dim=ff_dim, rate=0.3)(x)  # Increased dropout rate
+    x = GlobalAveragePooling1D()(x)
+    x = Dropout(0.3)(x)  # Increased dropout rate
+    outputs = Dense(1)(x)
 
-x = GlobalAveragePooling1D()(x)
-x = Dropout(0.3)(x)  # Increased dropout rate
-outputs = Dense(1)(x)
+    model = Model(inputs=inputs, outputs=outputs)
 
-model = Model(inputs=inputs, outputs=outputs)
+    # Optimizer and loss function
+    optimizer = AdamW(learning_rate=1e-4, weight_decay=1e-5)
+    model.compile(optimizer=optimizer, loss='huber')
 
-# Optimizer and loss function
-optimizer = AdamW(learning_rate=1e-4, weight_decay=1e-5)
-model.compile(optimizer=optimizer, loss='huber')
+    # Callbacks
+    early_stop = EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, mode='min')
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-6)
+    checkpoint = ModelCheckpoint('best_model.keras', monitor='val_loss', save_best_only=True)
+    callbacks = [early_stop, reduce_lr, checkpoint]
 
-# Callbacks
-early_stop = EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, mode='min')
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-6)
-checkpoint = ModelCheckpoint('best_model.keras', monitor='val_loss', save_best_only=True)
-callbacks = [early_stop, reduce_lr, checkpoint]
-
-# **Trening**
-history = model.fit(
-    X_train, y_train,
-    epochs=1000,
-    batch_size=32,
-    validation_split=0.1,
-    callbacks=callbacks
-)
+    # **Training**
+    history = model.fit(
+        X_train, y_train,
+        epochs=1000,
+        batch_size=32,
+        validation_split=0.1,
+        callbacks=callbacks
+    )
 
 # Make predictions and inverse scaling
 predictions_scaled = model.predict(X_test)
@@ -405,15 +420,45 @@ X_test_flat = X.iloc[-(len(y_test)):]
 X_test_inv_full = feature_scaler.inverse_transform(X_test_flat)
 X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test_flat.index)
 
-# **Generer Signals**
-signals = []
+# Calculate expected percentage changes over the prediction horizon
+expected_pct_changes = []
 for i in range(len(predictions_inv)):
-    if predictions_inv[i] > X_test_inv_full.iloc[i]['Close'] * 1.01:
+    current_price = X_test_inv_full.iloc[i]['Close']
+    predicted_price = predictions_inv[i][0]
+    expected_pct_change = (predicted_price - current_price) / current_price
+    expected_pct_changes.append(expected_pct_change)
+
+# Define dynamic thresholds based on historical data or desired sensitivity
+buy_threshold = 0.02  # 2% increase
+sell_threshold = -0.02  # 1% decrease
+
+signals = []
+for expected_pct_change in expected_pct_changes:
+    if expected_pct_change >= buy_threshold:
         signals.append(1)  # Buy
-    elif predictions_inv[i] < X_test_inv_full.iloc[i]['Close'] * 0.99:
+    elif expected_pct_change <= sell_threshold:
         signals.append(-1)  # Sell
     else:
         signals.append(0)  # Hold
+
+# Define maximum expected changes for normalization
+max_expected_increase = 0.05  # 5% increase
+max_expected_decrease = -0.05  # -5% decrease
+
+trade_sizes = []
+# Update the trade size calculation
+for i, expected_pct_change in enumerate(expected_pct_changes):
+    if expected_pct_change >= buy_threshold:
+        trade_size = min(expected_pct_change / max_expected_increase, 1.0)
+    elif expected_pct_change <= sell_threshold:
+        # Sell all positions if expected drop is significant
+        if expected_pct_change <= -0.03:  # 3% drop
+            trade_size = 1.0
+        else:
+            trade_size = min(-expected_pct_change / max_expected_decrease, 1.0)
+    else:
+        trade_size = 0.0
+    trade_sizes.append(trade_size)
 
 num_buy_signals = signals.count(1)
 num_sell_signals = signals.count(-1)
@@ -423,47 +468,45 @@ print(f"Number of Buy signals: {num_buy_signals}")
 print(f"Number of Sell signals: {num_sell_signals}")
 print(f"Number of Hold signals: {num_hold_signals}")
 
-# **Buy-and-Hold Strategy med Separat Initial Investering**
-buy_hold_investment = initial_investment  # Bruk initial_investment for buy-and-hold
+# **Buy-and-Hold Strategy with Separate Initial Investment**
+buy_hold_investment = initial_investment  # Use initial_investment for buy-and-hold
 initial_price_buy_hold = y_test_inv[0][0]
 units_buy_hold = buy_hold_investment / initial_price_buy_hold
 buy_hold_portfolio = units_buy_hold * y_test_inv.flatten()
 
-# Verifiser at den første verdien er lik investeringen
-print(f"\nInitial pris (Buy and Hold): {initial_price_buy_hold}")
-print(f"Units kjøpt (Buy and Hold): {units_buy_hold}")
-print(f"Første verdi i buy_hold_portfolio: {buy_hold_portfolio[0]}")  # Skal være ~$10,000
+# Verify that the first value equals the investment
+print(f"\nInitial price (Buy and Hold): {initial_price_buy_hold}")
+print(f"Units purchased (Buy and Hold): {units_buy_hold}")
+print(f"First value in buy_hold_portfolio: {buy_hold_portfolio[0]}")  # Should be ~$10,000
 
-# Sjekk de første 5 verdiene i buy_hold_portfolio
-print("\nFørste 5 verdier i buy_hold_portfolio:")
+# Check the first 5 values in buy_hold_portfolio
+print("\nFirst 5 values in buy_hold_portfolio:")
 print(buy_hold_portfolio[:5])
 
 # **Trading Simulation**
 # Re-initialize investment and positions for trading simulation
 investment = initial_investment
-positions = 0
+positions = 0.0
 portfolio = []
-transaction_fee = 0.0  # Set transaction fee (e.g., 0.001 for 0.1%)
+transaction_fee = 0.0
 
 print("\nStarting Trading Simulation...\n")
 
 for i in range(len(signals)):
-    price = y_test_inv[i][0]
+    price = X_test_inv_full.iloc[i]['Close']  # Use current price
     trade_signal = signals[i]
-    trade_size = 0.5  # Trade 50% of available funds or positions
+    trade_size = trade_sizes[i]
     date = indices_test[i].strftime('%Y-%m-%d')
 
-    # Sjekk at prisen er positiv før handel
     if price <= 0:
-        print(f"Advarsel: Ikke gyldig pris på {date}: {price}. Hopper over handel.")
+        print(f"Warning: Invalid price on {date}: {price}. Skipping trade.")
         portfolio_value = investment + positions * price
         portfolio.append(portfolio_value)
         continue
 
-    if trade_signal == 1 and investment >= price:
+    if trade_signal == 1 and investment > 0:
         amount_to_invest = investment * trade_size
         units = (amount_to_invest - amount_to_invest * transaction_fee) / price
-        units = int(units)
         if units > 0:
             cost = units * price
             fee = cost * transaction_fee
@@ -472,10 +515,10 @@ for i in range(len(signals)):
             investment -= total_cost
             positions += units
             investment_after = investment
-            print(f"Buy on {date}:\n  Investment before: ${investment_before:.2f}\n  Units bought: {units}\n  Price: ${price:.2f}\n  Investment after: ${investment_after:.2f}\n")
-    
+            print(f"Buy on {date}:\n  Expected increase over {prediction_horizon} days: {expected_pct_changes[i]*100:.2f}%\n  Trade size: {trade_size*100:.2f}%\n  Investment before: ${investment_before:.2f}\n  Units bought: {units:.6f}\n  Price: ${price:.2f}\n  Investment after: ${investment_after:.2f}\n")
+
     elif trade_signal == -1 and positions > 0:
-        units_to_sell = int(positions * trade_size)
+        units_to_sell = positions * trade_size
         if units_to_sell > 0:
             revenue = units_to_sell * price
             fee = revenue * transaction_fee
@@ -484,8 +527,8 @@ for i in range(len(signals)):
             investment += total_revenue
             positions -= units_to_sell
             investment_after = investment
-            print(f"Sell on {date}:\n  Investment before: ${investment_before:.2f}\n  Units sold: {units_to_sell}\n  Price: ${price:.2f}\n  Investment after: ${investment_after:.2f}\n")
-    
+            print(f"Sell on {date}:\n  Expected decrease over {prediction_horizon} days: {expected_pct_changes[i]*100:.2f}%\n  Trade size: {trade_size*100:.2f}%\n  Investment before: ${investment_before:.2f}\n  Units sold: {units_to_sell:.6f}\n  Price: ${price:.2f}\n  Investment after: ${investment_after:.2f}\n")
+
     portfolio_value = investment + positions * price
     portfolio.append(portfolio_value)
 
@@ -524,11 +567,12 @@ plt.legend()
 plt.show()
 
 # Plot training and validation loss
-plt.figure(figsize=(12,6))
-plt.plot(history.history['loss'], label='Training Loss')
-plt.plot(history.history['val_loss'], label='Validation Loss')
-plt.title('Loss Over Time')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.legend()
-plt.show()
+if history is not None:
+    plt.figure(figsize=(12, 6))
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Loss Over Time')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.show()
