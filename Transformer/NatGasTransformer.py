@@ -429,8 +429,8 @@ for i in range(len(predictions_inv)):
     expected_pct_changes.append(expected_pct_change)
 
 # Define dynamic thresholds based on historical data or desired sensitivity
-buy_threshold = 0.02  # 2% increase
-sell_threshold = -0.02  # 1% decrease
+buy_threshold = 0.17  #17% increase
+sell_threshold = -0.07  # 4% decrease
 
 signals = []
 for expected_pct_change in expected_pct_changes:
@@ -442,8 +442,8 @@ for expected_pct_change in expected_pct_changes:
         signals.append(0)  # Hold
 
 # Define maximum expected changes for normalization
-max_expected_increase = 0.05  # 5% increase
-max_expected_decrease = -0.05  # -5% decrease
+max_expected_increase = 0.10  # 10% increase
+max_expected_decrease = 0.3  # -30% decrease
 
 trade_sizes = []
 # Update the trade size calculation
@@ -452,7 +452,7 @@ for i, expected_pct_change in enumerate(expected_pct_changes):
         trade_size = min(expected_pct_change / max_expected_increase, 1.0)
     elif expected_pct_change <= sell_threshold:
         # Sell all positions if expected drop is significant
-        if expected_pct_change <= -0.03:  # 3% drop
+        if expected_pct_change <= -0.075:  # 7.5% drop
             trade_size = 1.0
         else:
             trade_size = min(-expected_pct_change / max_expected_decrease, 1.0)
@@ -563,6 +563,16 @@ plt.plot(indices_test, predictions_inv.flatten(), label='Predicted')
 plt.title('Actual vs Predicted Prices')
 plt.xlabel('Date')
 plt.ylabel('Price')
+plt.legend()
+plt.show()
+
+# Visualiser forventede prosentvise endringer over tid
+plt.figure(figsize=(12, 6))
+plt.plot(indices_test, np.array(expected_pct_changes) * 100, marker='o', linestyle='-', label='Forventet % Endring')
+plt.axhline(0, color='black', linestyle='--', linewidth=1)
+plt.title('Forventede Prosentvise Endringer Over Tid')
+plt.xlabel('Dato')
+plt.ylabel('Forventet % Endring (%)')
 plt.legend()
 plt.show()
 
