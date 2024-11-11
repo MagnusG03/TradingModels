@@ -283,3 +283,13 @@ plt.show()
 # Print final values for both strategies
 print(f'Final Model Portfolio Value: {portfolio[-1]}')
 print(f'Final Buy and Hold Portfolio Value: {buy_hold_portfolio[-1]}')
+
+# Visualize Predictions
+plt.figure(figsize=(12, 6))
+plt.plot(X_test_inv_full.index, y_test_inv.flatten(), label='Actual')
+plt.plot(X_test_inv_full.index, predictions_inv.flatten(), label='Predicted')
+plt.title('Actual vs Predicted Prices')
+plt.xlabel('Date')
+plt.ylabel('Price')
+plt.legend()
+plt.show()
