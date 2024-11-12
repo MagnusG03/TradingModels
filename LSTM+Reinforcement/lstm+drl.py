@@ -12,9 +12,11 @@ warnings.filterwarnings('ignore')
 
 # For LSTM model
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
+
+import os  # For checking if model files exist
 
 # Data Collection
 
@@ -187,20 +189,31 @@ X_lstm, y_lstm = create_sequences(lstm_scaled_data, seq_length)
 # Reshape X_lstm for LSTM input
 X_lstm = np.reshape(X_lstm, (X_lstm.shape[0], X_lstm.shape[1], 1))
 
-# Build and Train LSTM Model on Training Data
-lstm_model = Sequential()
-lstm_model.add(LSTM(128, return_sequences=True, input_shape=(X_lstm.shape[1], 1)))
-lstm_model.add(Dropout(0.2))
-lstm_model.add(LSTM(64))
-lstm_model.add(Dropout(0.2))
-lstm_model.add(Dense(1))
-lstm_model.compile(optimizer='adam', loss='mean_squared_error')
+# Check if LSTM model exists
+lstm_model_path = './LSTM+Reinforcement/lstm_model.h5'
+if os.path.exists(lstm_model_path):
+    # Load existing LSTM model
+    print("Loading existing LSTM model...")
+    lstm_model = load_model(lstm_model_path)
+else:
+    # Build and Train LSTM Model on Training Data
+    lstm_model = Sequential()
+    lstm_model.add(LSTM(128, return_sequences=True, input_shape=(X_lstm.shape[1], 1)))
+    lstm_model.add(Dropout(0.2))
+    lstm_model.add(LSTM(64))
+    lstm_model.add(Dropout(0.2))
+    lstm_model.add(Dense(1))
+    lstm_model.compile(optimizer='adam', loss='mean_squared_error')
 
-# Use early stopping
-early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+    # Use early stopping
+    early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
 
-# Train model
-history = lstm_model.fit(X_lstm, y_lstm, epochs=100, batch_size=32, callbacks=[early_stopping])
+    # Train model
+    history = lstm_model.fit(X_lstm, y_lstm, epochs=100, batch_size=32, callbacks=[early_stopping])
+
+    # Save the trained LSTM model
+    lstm_model.save(lstm_model_path)
+    print("LSTM model saved to disk.")
 
 # Generate LSTM Predictions on Training Data
 
@@ -468,11 +481,23 @@ train_env_data = combined_data.iloc[:len(train_data)].reset_index(drop=True)
 # Initialize environment with training data
 train_env = CustomTradingEnv(train_env_data, training=True)
 
-# Initialize agent
-agent = PPO('MlpPolicy', train_env, verbose=1)
+# Path to save/load the DRL agent
+agent_model_path = './LSTM+Reinforcement/ppo_agent.zip'
 
-# Train agent
-agent.learn(total_timesteps=1000000)
+if os.path.exists(agent_model_path):
+    # Load existing agent
+    print("Loading existing DRL agent...")
+    agent = PPO.load(agent_model_path, env=train_env)
+else:
+    # Initialize agent
+    agent = PPO('MlpPolicy', train_env, verbose=1)
+
+    # Train agent
+    agent.learn(total_timesteps=3000000)
+
+    # Save the trained agent
+    agent.save(agent_model_path)
+    print("DRL agent saved to disk.")
 
 # Testing Data
 test_env_data = combined_data.iloc[len(train_data):].reset_index(drop=True)

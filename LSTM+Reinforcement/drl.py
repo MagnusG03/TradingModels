@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
 
+# For checking if model files exist
+import os
+
 # Data Collection
 
 # Define the ticker symbol and date range
@@ -304,11 +307,23 @@ train_env_data = train_data.copy().reset_index(drop=True)
 # Initialize training environment
 train_env = CustomTradingEnv(train_env_data)
 
-# Initialize agent
-agent = PPO('MlpPolicy', train_env, verbose=1)
+# Path to save/load the DRL agent
+agent_model_path = './LSTM+Reinforcement/ppo_agent2.zip'
 
-# Train agent
-agent.learn(total_timesteps=1000000)
+if os.path.exists(agent_model_path):
+    # Load existing agent
+    print("Loading existing DRL agent...")
+    agent = PPO.load(agent_model_path, env=train_env)
+else:
+    # Initialize agent
+    agent = PPO('MlpPolicy', train_env, verbose=1)
+
+    # Train agent
+    agent.learn(total_timesteps=3000000)
+
+    # Save the trained agent
+    agent.save(agent_model_path)
+    print("DRL agent saved to disk.")
 
 # Testing Data
 test_env_data = test_data.copy().reset_index(drop=True)
