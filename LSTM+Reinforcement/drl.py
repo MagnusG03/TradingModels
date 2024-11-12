@@ -13,7 +13,7 @@ warnings.filterwarnings('ignore')
 # Data Collection
 
 # Define the ticker symbol and date range
-ticker = 'AAPL'
+ticker = 'CL=F'
 start_date = '2015-01-01'
 end_date = '2023-10-01'
 
@@ -144,16 +144,27 @@ data.dropna(subset=features, inplace=True)
 # Reset index after dropping rows
 data.reset_index(drop=True, inplace=True)
 
+# Split the Data into Training and Testing Sets
+split_index = int(len(data) * 0.8)  # 80% training, 20% testing
+
+# Split the data
+train_data = data.iloc[:split_index].reset_index(drop=True)
+test_data = data.iloc[split_index:].reset_index(drop=True)
+
 # Feature Scaling (Optional)
 # Exclude 'Close' from scaling
 features_to_scale = [feature for feature in features if feature != close_col]
 
 # Scale features to a range between 0 and 1 for better performance
 scaler = MinMaxScaler()
-data[features_to_scale] = scaler.fit_transform(data[features_to_scale])
+train_data[features_to_scale] = scaler.fit_transform(train_data[features_to_scale])
+
+# Use the same scaler to transform test data
+test_data[features_to_scale] = scaler.transform(test_data[features_to_scale])
 
 # Verify that all 'Close' prices are positive after preprocessing (before scaling)
-assert (data[close_col] > 0).all(), "There are non-positive 'Close' prices in the data after preprocessing."
+assert (train_data[close_col] > 0).all(), "There are non-positive 'Close' prices in the training data after preprocessing."
+assert (test_data[close_col] > 0).all(), "There are non-positive 'Close' prices in the testing data after preprocessing."
 
 # Custom Trading Environment for Reinforcement Learning
 
@@ -209,8 +220,6 @@ class CustomTradingEnv(gym.Env):
     def step(self, action):
         # Execute one time step within the environment
         current_price = float(self.df.iloc[self.current_step][close_col])
-
-        # No need to handle non-positive current_price since data preprocessing ensures all prices are positive
 
         done = False
 
@@ -288,55 +297,60 @@ class CustomTradingEnv(gym.Env):
 # Initialize Environment and Agent
 
 # Prepare data for the environment
-env_data = data.copy()
-env_data.reset_index(inplace=True, drop=True)
 
-# Initialize environment
-env = CustomTradingEnv(env_data)
+# Training Data
+train_env_data = train_data.copy().reset_index(drop=True)
+
+# Initialize training environment
+train_env = CustomTradingEnv(train_env_data)
 
 # Initialize agent
-agent = PPO('MlpPolicy', env, verbose=1)
+agent = PPO('MlpPolicy', train_env, verbose=1)
 
 # Train agent
-agent.learn(total_timesteps=100000)
+agent.learn(total_timesteps=1000000)
+
+# Testing Data
+test_env_data = test_data.copy().reset_index(drop=True)
+
+# Initialize testing environment
+test_env = CustomTradingEnv(test_env_data)
 
 # Backtesting and Evaluation
 
 # Reset environment
-obs = env.reset()
+obs = test_env.reset()
 
 # Variables to track performance
-net_worths = [env.net_worth]
-balances = [env.balance]
-held_shares = [env.shares_held]
+net_worths = [test_env.net_worth]
+balances = [test_env.balance]
+held_shares = [test_env.shares_held]
 actions = []
 prices = []
 profits = []
 
 # Run the agent in the environment
-for _ in range(len(env.df) - env.current_step - 1):
+for _ in range(len(test_env.df) - test_env.current_step - 1):
     # Record the current price before stepping
-    current_price = float(env.df.iloc[env.current_step][close_col])
+    current_price = float(test_env.df.iloc[test_env.current_step][close_col])
     prices.append(current_price)
-
-    # No need to handle non-positive current_price in backtesting since data preprocessing ensures all prices are positive
 
     action, _states = agent.predict(obs)
     action = int(action)  # Convert action from array to scalar
-    obs, reward, done, info = env.step(action)
+    obs, reward, done, info = test_env.step(action)
 
     # Record the variables
-    net_worths.append(env.net_worth)
-    balances.append(env.balance)
-    held_shares.append(env.shares_held)
+    net_worths.append(test_env.net_worth)
+    balances.append(test_env.balance)
+    held_shares.append(test_env.shares_held)
     actions.append(action)
-    profits.append(env.net_worth - env.initial_net_worth)
+    profits.append(test_env.net_worth - test_env.initial_net_worth)
 
     if done:
         break
 
 # Evaluate performance
-portfolio_performance = env.get_portfolio_performance()
+portfolio_performance = test_env.get_portfolio_performance()
 print(f"Total Return: {portfolio_performance['total_return'] * 100:.2f}%")
 print(f"Maximum Drawdown: {portfolio_performance['max_drawdown'] * 100:.2f}%")
 print(f"Sharpe Ratio: {portfolio_performance['sharpe_ratio']:.2f}")
@@ -378,7 +392,7 @@ plt.legend()
 plt.show()
 
 # Plot Returns Distribution
-returns = pd.Series(env.returns)
+returns = pd.Series(test_env.returns)
 plt.figure(figsize=(10,5))
 plt.hist(returns, bins=50, edgecolor='black')
 plt.title('Distribution of Daily Returns')
@@ -387,8 +401,8 @@ plt.ylabel('Frequency')
 plt.show()
 
 # Compare with Buy-and-Hold Strategy
-buy_and_hold_net_worth = [env.initial_net_worth]
-num_shares = env.initial_net_worth / prices[0]
+buy_and_hold_net_worth = [test_env.initial_net_worth]
+num_shares = test_env.initial_net_worth / prices[0]
 for price in prices[1:]:
     net_worth = num_shares * price
     buy_and_hold_net_worth.append(net_worth)
