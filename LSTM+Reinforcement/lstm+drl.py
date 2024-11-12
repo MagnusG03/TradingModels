@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler
 import gym
 from gym import spaces
 from stable_baselines3 import PPO
@@ -153,17 +153,24 @@ data.reset_index(drop=True, inplace=True)
 # Keep a copy of the original 'Close' price
 data['Close_unscaled'] = data[close_col]
 
-# Prepare Data for LSTM Model
+# Split the Data into Training and Testing Sets
+split_index = int(len(data) * 0.8)  # 80% training, 20% testing
 
-# Set the target variable 'y' as the next day's 'Close' price
-data['Target'] = data['Close_unscaled'].shift(-1)
+# Split the data
+train_data = data.iloc[:split_index].reset_index(drop=True)
+test_data = data.iloc[split_index:].reset_index(drop=True)
+
+# Prepare Data for LSTM Model on the Training Set
+
+# Set the target variable 'y' as the next day's 'Close' price in training data
+train_data['Target'] = train_data['Close_unscaled'].shift(-1)
 
 # Remove last row with NaN in 'Target'
-data.dropna(subset=['Target'], inplace=True)
+train_data.dropna(subset=['Target'], inplace=True)
 
 # Feature Scaling for LSTM
 lstm_scaler = MinMaxScaler()
-lstm_scaled_data = lstm_scaler.fit_transform(data[['Close_unscaled', 'Target']])
+lstm_scaled_data = lstm_scaler.fit_transform(train_data[['Close_unscaled', 'Target']])
 
 # Prepare sequences
 def create_sequences(data, seq_length):
@@ -180,15 +187,9 @@ X_lstm, y_lstm = create_sequences(lstm_scaled_data, seq_length)
 # Reshape X_lstm for LSTM input
 X_lstm = np.reshape(X_lstm, (X_lstm.shape[0], X_lstm.shape[1], 1))
 
-# Split into training and testing sets
-split = int(0.8 * len(X_lstm))
-X_train_lstm, X_test_lstm = X_lstm[:split], X_lstm[split:]
-y_train_lstm, y_test_lstm = y_lstm[:split], y_lstm[split:]
-
-# Build and Train LSTM Model
-
+# Build and Train LSTM Model on Training Data
 lstm_model = Sequential()
-lstm_model.add(LSTM(128, return_sequences=True, input_shape=(X_train_lstm.shape[1], 1)))
+lstm_model.add(LSTM(128, return_sequences=True, input_shape=(X_lstm.shape[1], 1)))
 lstm_model.add(Dropout(0.2))
 lstm_model.add(LSTM(64))
 lstm_model.add(Dropout(0.2))
@@ -196,47 +197,91 @@ lstm_model.add(Dense(1))
 lstm_model.compile(optimizer='adam', loss='mean_squared_error')
 
 # Use early stopping
-early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
 
 # Train model
-history = lstm_model.fit(X_train_lstm, y_train_lstm, epochs=100, batch_size=32,
-                         validation_data=(X_test_lstm, y_test_lstm), callbacks=[early_stopping])
+history = lstm_model.fit(X_lstm, y_lstm, epochs=100, batch_size=32, callbacks=[early_stopping])
 
-# Make Predictions
+# Generate LSTM Predictions on Training Data
 
-# Predict on the entire dataset
-full_predictions = lstm_model.predict(X_lstm)
+# Predict on the training data
+train_full_predictions = lstm_model.predict(X_lstm)
 
 # Prepare LSTM predictions as a feature
-# Since we shifted 'Target' by -1 and used sequences, we need to align the predictions properly
-
 # Initialize lstm_predictions with NaNs
-lstm_predictions = np.empty((len(data)))
-lstm_predictions[:] = np.nan
+train_lstm_predictions = np.empty((len(train_data)))
+train_lstm_predictions[:] = np.nan
 
 # Inverse transform the predictions
-inverse_predictions = lstm_scaler.inverse_transform(
-    np.concatenate((lstm_scaled_data[seq_length:, 0].reshape(-1,1), full_predictions), axis=1)
+train_inverse_predictions = lstm_scaler.inverse_transform(
+    np.concatenate((lstm_scaled_data[seq_length:, 0].reshape(-1,1), train_full_predictions), axis=1)
 )[:,1]
 
 # Assign predictions to lstm_predictions from index 'seq_length' onward
-lstm_predictions[seq_length:] = inverse_predictions
+train_lstm_predictions[seq_length:] = train_inverse_predictions
 
-# Add LSTM predictions to the DataFrame
-data['LSTM_Prediction_unscaled'] = lstm_predictions
+# Add LSTM predictions to the training DataFrame
+train_data['LSTM_Prediction_unscaled'] = train_lstm_predictions
 
 # Drop any rows with NaN in 'LSTM_Prediction_unscaled'
-data.dropna(subset=['LSTM_Prediction_unscaled'], inplace=True)
+train_data.dropna(subset=['LSTM_Prediction_unscaled'], inplace=True)
 
 # Reset index after dropping rows
-data.reset_index(drop=True, inplace=True)
+train_data.reset_index(drop=True, inplace=True)
+
+# Prepare Test Data for LSTM Predictions
+
+# Set the target variable 'y' as the next day's 'Close' price in test data
+test_data['Target'] = test_data['Close_unscaled'].shift(-1)
+
+# Remove last row with NaN in 'Target'
+test_data.dropna(subset=['Target'], inplace=True)
+
+# Feature Scaling for LSTM using the same scaler
+test_lstm_scaled_data = lstm_scaler.transform(test_data[['Close_unscaled', 'Target']])
+
+# Prepare sequences
+X_test_lstm, y_test_lstm = create_sequences(test_lstm_scaled_data, seq_length)
+
+# Reshape X_test_lstm for LSTM input
+X_test_lstm = np.reshape(X_test_lstm, (X_test_lstm.shape[0], X_test_lstm.shape[1], 1))
+
+# Generate LSTM Predictions on Testing Data
+
+# Predict on the test data
+test_full_predictions = lstm_model.predict(X_test_lstm)
+
+# Prepare LSTM predictions as a feature
+# Initialize lstm_predictions with NaNs
+test_lstm_predictions = np.empty((len(test_data)))
+test_lstm_predictions[:] = np.nan
+
+# Inverse transform the predictions
+test_inverse_predictions = lstm_scaler.inverse_transform(
+    np.concatenate((test_lstm_scaled_data[seq_length:, 0].reshape(-1,1), test_full_predictions), axis=1)
+)[:,1]
+
+# Assign predictions to lstm_predictions from index 'seq_length' onward
+test_lstm_predictions[seq_length:] = test_inverse_predictions
+
+# Add LSTM predictions to the testing DataFrame
+test_data['LSTM_Prediction_unscaled'] = test_lstm_predictions
+
+# Drop any rows with NaN in 'LSTM_Prediction_unscaled'
+test_data.dropna(subset=['LSTM_Prediction_unscaled'], inplace=True)
+
+# Reset index after dropping rows
+test_data.reset_index(drop=True, inplace=True)
+
+# Combine the data
+combined_data = pd.concat([train_data, test_data], ignore_index=True)
 
 # Keep unscaled versions for environment calculations
-data['Close_unscaled'] = data['Close_unscaled']
-data['LSTM_Prediction_unscaled'] = data['LSTM_Prediction_unscaled']
+combined_data['Close_unscaled'] = combined_data['Close_unscaled']
+combined_data['LSTM_Prediction_unscaled'] = combined_data['LSTM_Prediction_unscaled']
 
-# **Rename 'LSTM_Prediction_unscaled' to 'LSTM_Prediction' for scaling**
-data.rename(columns={'LSTM_Prediction_unscaled': 'LSTM_Prediction'}, inplace=True)
+# Rename 'LSTM_Prediction_unscaled' to 'LSTM_Prediction' for scaling
+combined_data.rename(columns={'LSTM_Prediction_unscaled': 'LSTM_Prediction'}, inplace=True)
 
 # Update features list to include 'LSTM_Prediction'
 features.append('LSTM_Prediction')
@@ -249,25 +294,24 @@ robust_features = ['MACD']
 minmax_features = [feat for feat in features_to_scale if feat not in robust_features]
 
 # Feature Scaling
-from sklearn.preprocessing import RobustScaler
 
 # Apply MinMaxScaler to minmax_features
 scaler_minmax = MinMaxScaler()
-data[minmax_features] = scaler_minmax.fit_transform(data[minmax_features])
+combined_data[minmax_features] = scaler_minmax.fit_transform(combined_data[minmax_features])
 
 # Apply RobustScaler to robust_features
 scaler_robust = RobustScaler()
-data[robust_features] = scaler_robust.fit_transform(data[robust_features])
+combined_data[robust_features] = scaler_robust.fit_transform(combined_data[robust_features])
 
 # Verify scaling for minmax_features
 tol = 1e-6
-min_vals = data[minmax_features].min()
-max_vals = data[minmax_features].max()
+min_vals = combined_data[minmax_features].min()
+max_vals = combined_data[minmax_features].max()
 
 # Print min and max values for each feature
 for feature in features_to_scale:
-    min_val = data[feature].min()
-    max_val = data[feature].max()
+    min_val = combined_data[feature].min()
+    max_val = combined_data[feature].max()
     print(f"Feature '{feature}' - min: {min_val}, max: {max_val}")
 
 # Adjusted assertion
@@ -279,11 +323,12 @@ class CustomTradingEnv(gym.Env):
     """A custom trading environment for reinforcement learning"""
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, df):
+    def __init__(self, df, training=True):
         super(CustomTradingEnv, self).__init__()
 
         self.df = df.reset_index(drop=True)
         self.df_total_steps = len(self.df) - 1
+        self.training = training
 
         # Actions: 0 = Hold, 1 = Buy, 2 = Sell
         self.action_space = spaces.Discrete(3)
@@ -299,8 +344,8 @@ class CustomTradingEnv(gym.Env):
                 obs_high[idx] = 1 + tol
             elif feature in robust_features:
                 # Since 'MACD' is scaled using RobustScaler, set bounds based on the data
-                obs_low[idx] = data[feature].min() - tol
-                obs_high[idx] = data[feature].max() + tol
+                obs_low[idx] = combined_data[feature].min() - tol
+                obs_high[idx] = combined_data[feature].max() + tol
 
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
@@ -417,53 +462,59 @@ class CustomTradingEnv(gym.Env):
 # Initialize Environment and Agent
 
 # Prepare data for the environment
-env_data = data.copy()
-env_data.reset_index(inplace=True, drop=True)
+# Training Data
+train_env_data = combined_data.iloc[:len(train_data)].reset_index(drop=True)
 
-# Initialize environment
-env = CustomTradingEnv(env_data)
+# Initialize environment with training data
+train_env = CustomTradingEnv(train_env_data, training=True)
 
 # Initialize agent
-agent = PPO('MlpPolicy', env, verbose=1)
+agent = PPO('MlpPolicy', train_env, verbose=1)
 
 # Train agent
-agent.learn(total_timesteps=100000)
+agent.learn(total_timesteps=1000000)
+
+# Testing Data
+test_env_data = combined_data.iloc[len(train_data):].reset_index(drop=True)
+
+# Initialize environment with testing data
+test_env = CustomTradingEnv(test_env_data, training=False)
 
 # Backtesting and Evaluation
 
 # Reset environment
-obs = env.reset()
+obs = test_env.reset()
 
 # Variables to track performance
-net_worths = [env.net_worth]
-balances = [env.balance]
-held_shares = [env.shares_held]
+net_worths = [test_env.net_worth]
+balances = [test_env.balance]
+held_shares = [test_env.shares_held]
 actions = []
 prices = []
 profits = []
 
 # Run the agent in the environment
-for _ in range(len(env.df) - env.current_step - 1):
+for _ in range(len(test_env.df) - test_env.current_step - 1):
     # Record the current price before stepping
-    current_price = float(env.df.iloc[env.current_step]['Close_unscaled'])
+    current_price = float(test_env.df.iloc[test_env.current_step]['Close_unscaled'])
     prices.append(current_price)
 
     action, _states = agent.predict(obs)
     action = int(action)  # Convert action from array to scalar
-    obs, reward, done, info = env.step(action)
+    obs, reward, done, info = test_env.step(action)
 
     # Record the variables
-    net_worths.append(env.net_worth)
-    balances.append(env.balance)
-    held_shares.append(env.shares_held)
+    net_worths.append(test_env.net_worth)
+    balances.append(test_env.balance)
+    held_shares.append(test_env.shares_held)
     actions.append(action)
-    profits.append(env.net_worth - env.initial_net_worth)
+    profits.append(test_env.net_worth - test_env.initial_net_worth)
 
     if done:
         break
 
 # Evaluate performance
-portfolio_performance = env.get_portfolio_performance()
+portfolio_performance = test_env.get_portfolio_performance()
 print(f"Total Return: {portfolio_performance['total_return'] * 100:.2f}%")
 print(f"Maximum Drawdown: {portfolio_performance['max_drawdown'] * 100:.2f}%")
 print(f"Sharpe Ratio: {portfolio_performance['sharpe_ratio']:.2f}")
@@ -505,7 +556,7 @@ plt.legend()
 plt.show()
 
 # Plot Returns Distribution
-returns = pd.Series(env.returns)
+returns = pd.Series(test_env.returns)
 plt.figure(figsize=(10,5))
 plt.hist(returns, bins=50, edgecolor='black')
 plt.title('Distribution of Daily Returns')
@@ -514,8 +565,8 @@ plt.ylabel('Frequency')
 plt.show()
 
 # Compare with Buy-and-Hold Strategy
-buy_and_hold_net_worth = [env.initial_net_worth]
-num_shares = env.initial_net_worth / prices[0]
+buy_and_hold_net_worth = [test_env.initial_net_worth]
+num_shares = test_env.initial_net_worth / prices[0]
 for price in prices[1:]:
     net_worth = num_shares * price
     buy_and_hold_net_worth.append(net_worth)
