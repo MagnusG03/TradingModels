@@ -209,9 +209,9 @@ y_train, y_test = y_seq[:split], y_seq[split:]
 indices_train, indices_test = y_indices[:split], y_indices[split:]
 
 # Check if the model file exists
-if os.path.exists('lstm_crude_oil_model.h5'):
+if os.path.exists('./TrainedModels/LSTM/lstm_crude_oil_model.h5'):
     print("Model file exists. Loading model...")
-    model = load_model('lstm_crude_oil_model.h5')
+    model = load_model('./TrainedModels/LSTM/lstm_crude_oil_model.h5')
     history = None  # No training history
 else:
     print("Model file not found. Building and training the model...")
@@ -233,7 +233,7 @@ else:
         callbacks=[early_stop]
     )
     # Save the trained model
-    model.save('lstm_crude_oil_model.h5')
+    model.save('./TrainedModels/LSTM/lstm_crude_oil_model.h5')
 
 # Make predictions and inverse scaling
 predictions = model.predict(X_test)

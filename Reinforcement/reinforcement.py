@@ -232,7 +232,7 @@ class DQNAgent:
             self.epsilon *= self.epsilon_decay
 
 # Path to save and load the model
-model_path = 'dqn_trading_2m_model.keras'
+model_path = './TrainedModels/DRL/dqn_trading_2m_model.keras'
 
 # Create training and evaluation environments
 train_size = int(len(gold_data) * 0.8)

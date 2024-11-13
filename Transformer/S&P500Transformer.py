@@ -367,11 +367,11 @@ class PositionalEncoding(Layer):
         return inputs + self.pos_encoding[:, :seq_len, :]
 
 # Check if the model file exists
-if os.path.exists('s&p500_model.keras'):
+if os.path.exists('./TrainedModels/Transformer/s&p500_model.keras'):
     print("Model file exists. Loading model...")
     from tensorflow.keras.models import load_model
     model = tf.keras.models.load_model(
-        's&p500_model.keras', 
+        './TrainedModels/Transformer/s&p500_model.keras', 
         custom_objects={'TransformerBlock': TransformerBlock, 'PositionalEncoding': PositionalEncoding}
     )
     history = None  # No training history
@@ -398,7 +398,7 @@ else:
     # Callbacks
     early_stop = EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True, mode='min')
     reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, min_lr=1e-6)
-    checkpoint = ModelCheckpoint('s&p500_model.keras', monitor='val_loss', save_best_only=True)
+    checkpoint = ModelCheckpoint('./TrainedModels/Transformer/s&p500_model.keras', monitor='val_loss', save_best_only=True)
     callbacks = [early_stop, reduce_lr, checkpoint]
 
     # **Training**

@@ -333,7 +333,7 @@ class DQNAgent:
             print(f"An error occurred during replay: {e}")
 
 # Paths to save and load the model
-model_path = 'dqn_trading_daily_model.keras'
+model_path = './TrainedModels/DRL/dqn_trading_daily_model.keras'
 
 # Create training and evaluation environments
 train_size = int(len(data) * 0.8)
