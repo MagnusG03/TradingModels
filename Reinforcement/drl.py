@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler
 import gym
 from gym import spaces
 from stable_baselines3 import PPO
@@ -147,6 +147,9 @@ data.dropna(subset=features, inplace=True)
 # Reset index after dropping rows
 data.reset_index(drop=True, inplace=True)
 
+# Keep a copy of the unscaled 'Close' price
+data['Close_unscaled'] = data[close_col]
+
 # Split the Data into Training and Testing Sets
 split_index = int(len(data) * 0.8)  # 80% training, 20% testing
 
@@ -154,20 +157,17 @@ split_index = int(len(data) * 0.8)  # 80% training, 20% testing
 train_data = data.iloc[:split_index].reset_index(drop=True)
 test_data = data.iloc[split_index:].reset_index(drop=True)
 
-# Feature Scaling (Optional)
-# Exclude 'Close' from scaling
-features_to_scale = [feature for feature in features if feature != close_col]
+# Feature Scaling
+# Exclude 'Close_unscaled' from scaling
+features_to_scale = [feature for feature in features if feature != 'Close_unscaled']
 
-# Scale features to a range between 0 and 1 for better performance
-scaler = MinMaxScaler()
-train_data[features_to_scale] = scaler.fit_transform(train_data[features_to_scale])
+# Use StandardScaler for scaling
+scaler = StandardScaler()
+scaler.fit(train_data[features_to_scale])
 
-# Use the same scaler to transform test data
+# Apply scaler to train and test data
+train_data[features_to_scale] = scaler.transform(train_data[features_to_scale])
 test_data[features_to_scale] = scaler.transform(test_data[features_to_scale])
-
-# Verify that all 'Close' prices are positive after preprocessing (before scaling)
-assert (train_data[close_col] > 0).all(), "There are non-positive 'Close' prices in the training data after preprocessing."
-assert (test_data[close_col] > 0).all(), "There are non-positive 'Close' prices in the testing data after preprocessing."
 
 # Custom Trading Environment for Reinforcement Learning
 
@@ -199,7 +199,6 @@ class CustomTradingEnv(gym.Env):
         self.initial_net_worth = 10000.0
         self.returns = []
 
-        # Define the transaction fee rate (1% in this case)
         self.transaction_fee_rate = 0.01  # 1% transaction fee
 
     def reset(self):
@@ -222,7 +221,7 @@ class CustomTradingEnv(gym.Env):
 
     def step(self, action):
         # Execute one time step within the environment
-        current_price = float(self.df.iloc[self.current_step][close_col])
+        current_price = float(self.df.iloc[self.current_step]['Close_unscaled'])
 
         done = False
 
@@ -308,7 +307,7 @@ train_env_data = train_data.copy().reset_index(drop=True)
 train_env = CustomTradingEnv(train_env_data)
 
 # Path to save/load the DRL agent
-agent_model_path = './LSTM+Reinforcement/ppo_agent2.zip'
+agent_model_path = 'ppo_agent.zip'
 
 if os.path.exists(agent_model_path):
     # Load existing agent
@@ -319,7 +318,7 @@ else:
     agent = PPO('MlpPolicy', train_env, verbose=1)
 
     # Train agent
-    agent.learn(total_timesteps=3000000)
+    agent.learn(total_timesteps=300000)
 
     # Save the trained agent
     agent.save(agent_model_path)
@@ -345,9 +344,9 @@ prices = []
 profits = []
 
 # Run the agent in the environment
-for _ in range(len(test_env.df) - test_env.current_step - 1):
+while True:
     # Record the current price before stepping
-    current_price = float(test_env.df.iloc[test_env.current_step][close_col])
+    current_price = float(test_env.df.iloc[test_env.current_step]['Close_unscaled'])
     prices.append(current_price)
 
     action, _states = agent.predict(obs)

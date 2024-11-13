@@ -8,9 +8,14 @@ import yfinance as yf
 import datetime
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
-from tensorflow.keras.models import Sequential
+from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Input, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
+
+# Ensure reproducibility
+np.random.seed(42)
+import tensorflow as tf
+tf.random.set_seed(42)
 
 # Set the date ranges
 end_date = datetime.datetime.today()
@@ -20,10 +25,11 @@ start_date_2min = end_date - datetime.timedelta(days=59)         # 59 days
 
 # Download daily data
 daily_data = yf.download(
-    'NG=F',
+    'CL=F',
     start=start_date_daily.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='1d'
+    interval='1d',
+    progress=False
 )
 # Flatten MultiIndex columns if present in daily_data
 if isinstance(daily_data.columns, pd.MultiIndex):
@@ -33,10 +39,11 @@ daily_data.set_index('Date', inplace=True)
 
 # Download hourly data
 hourly_data = yf.download(
-    'NG=F',
+    'CL=F',
     start=start_date_hourly.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='1h'
+    interval='1h',
+    progress=False
 )
 # Flatten MultiIndex columns if present
 if isinstance(hourly_data.columns, pd.MultiIndex):
@@ -51,10 +58,11 @@ else:
 
 # Download 2-minute data
 data_2min = yf.download(
-    'NG=F',
+    'CL=F',
     start=start_date_2min.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='2m'
+    interval='2m',
+    progress=False
 )
 # Flatten MultiIndex columns if present
 if isinstance(data_2min.columns, pd.MultiIndex):
@@ -132,6 +140,18 @@ daily_data.set_index('Date', inplace=True)
 daily_data['Volatility_hourly'] = daily_data['Volatility_hourly'].ffill()
 daily_data['Volatility_2min'] = daily_data['Volatility_2min'].ffill()
 
+# **Handle Negative 'Close' Values with Forward Fill**
+# 1. Identify negative or zero 'Close' values
+negative_close_mask = daily_data['Close'] <= 0
+print(f"Number of days with negative or zero 'Close': {negative_close_mask.sum()}")
+
+# 2. Replace negative 'Close' values with NaN to use ffill
+daily_data.loc[negative_close_mask, 'Close'] = np.nan
+
+# 3. Use forward fill and backfill to replace NaN with the previous valid 'Close' value
+daily_data['Close'] = daily_data['Close'].ffill().bfill()
+
+# Fill other missing values
 daily_data = daily_data.ffill()
 daily_data['Close'] = daily_data['Close'].astype(float)
 
@@ -161,42 +181,59 @@ scaled_df = pd.DataFrame(scaled_data, columns=features, index=daily_data.index)
 daily_data[features] = scaled_df
 
 X = daily_data[features]
-y = daily_data['Close'].shift(-1)
-X = X[:-1]
-y = y[:-1]
+y = daily_data['Close']
+
+# **Set the prediction horizon**
+prediction_horizon = 10  # Predict 10 days ahead
+
+# Shift the target variable to predict N days ahead
+y = y.shift(-prediction_horizon)
+X = X[:-prediction_horizon]
+y = y[:-prediction_horizon]
 
 def create_sequences(X, y, time_steps=10):
-    Xs, ys = [], []
+    Xs, ys, indices = [], [], []
     for i in range(len(X) - time_steps):
         Xs.append(X.iloc[i:(i + time_steps)].values)
-        ys.append(y.iloc[i + time_steps])
-    return np.array(Xs), np.array(ys)
+        ys.append(y.iloc[i + time_steps - 1])  # Adjusted index
+        indices.append(y.index[i + time_steps - 1])
+    return np.array(Xs), np.array(ys), indices
 
 time_steps = 10
-X_seq, y_seq = create_sequences(X, y, time_steps)
+X_seq, y_seq, y_indices = create_sequences(X, y, time_steps)
 
 # Split the data
 split = int(0.8 * len(X_seq))
 X_train, X_test = X_seq[:split], X_seq[split:]
 y_train, y_test = y_seq[:split], y_seq[split:]
+indices_train, indices_test = y_indices[:split], y_indices[split:]
 
-# Build and train the LSTM model
-early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
-model = Sequential()
-model.add(Input(shape=(time_steps, X_train.shape[2])))
-model.add(LSTM(128, return_sequences=True))
-model.add(Dropout(0.2))
-model.add(LSTM(64))
-model.add(Dropout(0.2))
-model.add(Dense(1))
-model.compile(optimizer='adam', loss='mean_squared_error')
-model.fit(
-    X_train, y_train,
-    epochs=500,
-    batch_size=32,
-    validation_split=0.1,
-    callbacks=[early_stop]
-)
+# Check if the model file exists
+if os.path.exists('lstm_crude_oil_model.h5'):
+    print("Model file exists. Loading model...")
+    model = load_model('lstm_crude_oil_model.h5')
+    history = None  # No training history
+else:
+    print("Model file not found. Building and training the model...")
+    # Build and train the LSTM model
+    early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
+    model = Sequential()
+    model.add(Input(shape=(time_steps, X_train.shape[2])))
+    model.add(LSTM(128, return_sequences=True))
+    model.add(Dropout(0.2))
+    model.add(LSTM(64))
+    model.add(Dropout(0.2))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    history = model.fit(
+        X_train, y_train,
+        epochs=500,
+        batch_size=32,
+        validation_split=0.1,
+        callbacks=[early_stop]
+    )
+    # Save the trained model
+    model.save('lstm_crude_oil_model.h5')
 
 # Make predictions and inverse scaling
 predictions = model.predict(X_test)
@@ -226,48 +263,114 @@ X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test_f
 rmse = np.sqrt(mean_squared_error(y_test_inv, predictions_inv))
 print(f'Root Mean Squared Error: {rmse}')
 
-# Generate buy and sell signals with a more aggressive threshold to encourage buying and selling
-signals = []
+# **Modify Trading Strategy and Plotting**
+
+# Calculate expected percentage changes over the prediction horizon
+expected_pct_changes = []
 for i in range(len(predictions_inv)):
-    if predictions_inv[i] > X_test_inv_full.iloc[i]['Close'] * 1.15:
-        signals.append(2)  # Strong Buy
-    elif predictions_inv[i] > X_test_inv_full.iloc[i]['Close']:
+    current_price = X_test_inv_full.iloc[i]['Close']
+    predicted_price = predictions_inv[i]
+    expected_pct_change = (predicted_price - current_price) / current_price
+    expected_pct_changes.append(expected_pct_change)
+
+# Define dynamic thresholds based on historical data or desired sensitivity
+buy_threshold = 0.02  # 2% increase
+sell_threshold = -0.1  # 5% decrease
+
+signals = []
+for expected_pct_change in expected_pct_changes:
+    if expected_pct_change >= buy_threshold:
         signals.append(1)  # Buy
-    elif predictions_inv[i] < X_test_inv_full.iloc[i]['Close'] * 0.96:
-        signals.append(-1)  # Strong Sell
+    elif expected_pct_change <= sell_threshold:
+        signals.append(-1)  # Sell
     else:
         signals.append(0)  # Hold
 
-investment = 10000
-positions = 0
-portfolio = []
+# Define maximum expected changes for normalization
+max_expected_increase = 0.01  # 5% increase
+max_expected_decrease = -0.01  # -5% decrease
 
-transaction_fee = 0.01  # 1% transaction fee
+trade_sizes = []
+for i, expected_pct_change in enumerate(expected_pct_changes):
+    if expected_pct_change >= buy_threshold:
+        trade_size = min(expected_pct_change / max_expected_increase, 1.0)
+    elif expected_pct_change <= sell_threshold:
+        if expected_pct_change <= -0.1:  # 7% drop
+            trade_size = 1.0
+        else:
+            trade_size = min(-expected_pct_change / max_expected_decrease, 1.0)
+    else:
+        trade_size = 0.0
+    trade_sizes.append(trade_size)
+
+num_buy_signals = signals.count(1)
+num_sell_signals = signals.count(-1)
+num_hold_signals = signals.count(0)
+
+print(f"Number of Buy signals: {num_buy_signals}")
+print(f"Number of Sell signals: {num_sell_signals}")
+print(f"Number of Hold signals: {num_hold_signals}")
+
+# **Initial Investment Separately for Buy-and-Hold**
+initial_investment = 10000.0
+buy_hold_investment = initial_investment  # Use initial_investment for buy-and-hold
+initial_price_buy_hold = y_test_inv[0]
+units_buy_hold = buy_hold_investment / initial_price_buy_hold
+buy_hold_portfolio = units_buy_hold * y_test_inv
+
+# **Trading Simulation**
+# Re-initialize investment and positions for trading simulation
+investment = initial_investment
+positions = 0.0
+portfolio = []
+transaction_fee = 0.0
+
+print("\nStarting Trading Simulation...\n")
 
 for i in range(len(signals)):
-    price = y_test_inv[i]
-    if (signals[i] == 2 or signals[i] == 1) and investment >= price:  # Buy signals
-        units = investment // price
+    price = X_test_inv_full.iloc[i]['Close']  # Use current price
+    trade_signal = signals[i]
+    trade_size = trade_sizes[i]
+    date = indices_test[i].strftime('%Y-%m-%d')
+
+    if price <= 0:
+        print(f"Warning: Invalid price on {date}: {price}. Skipping trade.")
+        portfolio_value = investment + positions * price
+        portfolio.append(portfolio_value)
+        continue
+
+    if trade_signal == 1 and investment > 0:
+        amount_to_invest = investment * trade_size
+        units = (amount_to_invest - amount_to_invest * transaction_fee) / price
         if units > 0:
-            # Deduct transaction fee from the total investment cost
-            investment -= units * price * (1 + transaction_fee)
+            cost = units * price
+            fee = cost * transaction_fee
+            total_cost = cost + fee
+            investment_before = investment
+            investment -= total_cost
             positions += units
-    elif signals[i] == -1 and positions > 0:  # Strong Sell
-        # Apply transaction fee on the selling amount
-        investment += positions * price * (1 - transaction_fee)
-        positions = 0
+            investment_after = investment
+            print(f"Buy on {date}:\n  Expected increase over {prediction_horizon} days: {expected_pct_changes[i]*100:.2f}%\n  Trade size: {trade_size*100:.2f}%\n  Investment before: ${investment_before:.2f}\n  Units bought: {units:.6f}\n  Price: ${price:.2f}\n  Investment after: ${investment_after:.2f}\n")
+
+    elif trade_signal == -1 and positions > 0:
+        units_to_sell = positions * trade_size
+        if units_to_sell > 0:
+            revenue = units_to_sell * price
+            fee = revenue * transaction_fee
+            total_revenue = revenue - fee
+            investment_before = investment
+            investment += total_revenue
+            positions -= units_to_sell
+            investment_after = investment
+            print(f"Sell on {date}:\n  Expected decrease over {prediction_horizon} days: {expected_pct_changes[i]*100:.2f}%\n  Trade size: {trade_size*100:.2f}%\n  Investment before: ${investment_before:.2f}\n  Units sold: {units_to_sell:.6f}\n  Price: ${price:.2f}\n  Investment after: ${investment_after:.2f}\n")
+
     portfolio_value = investment + positions * price
     portfolio.append(portfolio_value)
 
-# Buy-and-hold strategy
-initial_price = y_test_inv[0]
-units_buy_hold = 10000 / initial_price
-buy_hold_portfolio = units_buy_hold * y_test_inv
-
-# Plot portfolio values over time
+# **Plot portfolio values over time**
 plt.figure(figsize=(12, 6))
-plt.plot(y_test_inv_full.index, portfolio, label='Model Portfolio')
-plt.plot(y_test_inv_full.index, buy_hold_portfolio, label='Buy and Hold Portfolio')
+plt.plot(indices_test, portfolio, label='Model Portfolio')
+plt.plot(indices_test, buy_hold_portfolio, label='Buy and Hold Portfolio')
 plt.title('Portfolio Value Over Time')
 plt.xlabel('Date')
 plt.ylabel('Portfolio Value ($)')
@@ -277,7 +380,7 @@ plt.show()
 # Plot difference between strategies
 difference = np.array(portfolio) - buy_hold_portfolio
 plt.figure(figsize=(12, 6))
-plt.plot(y_test_inv_full.index, difference, label='Profit/Loss vs Buy and Hold')
+plt.plot(indices_test, difference, label='Profit/Loss vs Buy and Hold')
 plt.title('Profit/Loss Compared to Buy and Hold Strategy')
 plt.xlabel('Date')
 plt.ylabel('Profit/Loss ($)')
@@ -285,15 +388,26 @@ plt.legend()
 plt.show()
 
 # Print final values for both strategies
-print(f'Final Model Portfolio Value: {portfolio[-1]}')
-print(f'Final Buy and Hold Portfolio Value: {buy_hold_portfolio[-1]}')
+print(f'\nFinal Model Portfolio Value: ${portfolio[-1]:.2f}')
+print(f'Final Buy and Hold Portfolio Value: ${buy_hold_portfolio[-1]:.2f}')
 
 # Visualize Predictions
 plt.figure(figsize=(12, 6))
-plt.plot(X_test_inv_full.index, y_test_inv.flatten(), label='Actual')
-plt.plot(X_test_inv_full.index, predictions_inv.flatten(), label='Predicted')
+plt.plot(indices_test, y_test_inv.flatten(), label='Actual')
+plt.plot(indices_test, predictions_inv.flatten(), label='Predicted')
 plt.title('Actual vs Predicted Prices')
 plt.xlabel('Date')
 plt.ylabel('Price')
 plt.legend()
 plt.show()
+
+# Plot training and validation loss
+if history is not None:
+    plt.figure(figsize=(12, 6))
+    plt.plot(history.history['loss'], label='Training Loss')
+    plt.plot(history.history['val_loss'], label='Validation Loss')
+    plt.title('Loss Over Time')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.show()

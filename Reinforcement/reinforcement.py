@@ -11,7 +11,7 @@ from collections import deque
 import random
 import os
 
-# Set the date range for the last 700 days
+# Set the date range for the last 3 days
 end_date = datetime.datetime.today()
 start_date = end_date - datetime.timedelta(days=3)
 
@@ -20,7 +20,7 @@ gold_data = yf.download(
     'GC=F',  # Gold futures symbol
     start=start_date.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='2m'  # 1-hour intervals
+    interval='2m'  # 2-minute intervals
 )
 gold_data.reset_index(inplace=True)
 
@@ -231,7 +231,7 @@ class DQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
-# Paths to save and load the model
+# Path to save and load the model
 model_path = 'dqn_trading_2m_model.keras'
 
 # Create training and evaluation environments
@@ -246,51 +246,58 @@ state_size = train_env.state_size
 action_size = len(train_env.action_space)
 
 # Load or initialize the agent
+model_loaded = False
 if os.path.exists(model_path):
     print("Loading saved model...")
     agent = DQNAgent(state_size, action_size)
     agent.model = keras.models.load_model(model_path)
     agent.update_target_model()
+    agent.epsilon = agent.epsilon_min  # Set epsilon to minimum since we are testing
+    model_loaded = True
 else:
     print("No saved model found. Initializing a new agent.")
     agent = DQNAgent(state_size, action_size)
 
-# Training the agent
-num_episodes = 50  # Number of episodes for training
-update_target_frequency = 5  # Update target network every 5 episodes
-reward_threshold = 1000  # Define the reward threshold for saving the model
+# Only train if model is not loaded
+if not model_loaded:
+    # Training the agent
+    num_episodes = 50  # Number of episodes for training
+    update_target_frequency = 5  # Update target network every 5 episodes
 
-best_reward = -float('inf')  # Initialize best reward
+    best_reward = -float('inf')  # Initialize best reward
 
-for e in range(num_episodes):
-    state = train_env.reset()
-    total_reward = 0
-    done = False
+    for e in range(num_episodes):
+        state = train_env.reset()
+        total_reward = 0
+        done = False
 
-    while not done:
-        # Agent takes action
-        action = agent.act(state)
-        # Environment responds with next state, reward, and done flag
-        next_state, reward, done = train_env.step(action)
-        # Remember the experience
-        agent.remember(state, action, reward, next_state, done)
-        state = next_state
-        total_reward += reward
+        while not done:
+            # Agent takes action
+            action = agent.act(state)
+            # Environment responds with next state, reward, and done flag
+            next_state, reward, done = train_env.step(action)
+            # Remember the experience
+            agent.remember(state, action, reward, next_state, done)
+            state = next_state
+            total_reward += reward
 
-        # Agent learns from the experience
-        agent.replay()
+            # Agent learns from the experience
+            agent.replay()
 
-    # Update target network
-    if e % update_target_frequency == 0:
-        agent.update_target_model()
+        # Update target network
+        if e % update_target_frequency == 0:
+            agent.update_target_model()
 
-    print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
+        print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
 
-    # Save the model if the total reward is greater than the threshold and best_reward
-    if total_reward > reward_threshold and total_reward > best_reward:
-        agent.model.save(model_path)
-        best_reward = total_reward  # Update the best reward
-        print(f"Model saved successfully with reward: {total_reward:.2f}")
+        # Save the model if the total reward is greater than the best_reward
+        if total_reward > best_reward:
+            agent.model.save(model_path)
+            best_reward = total_reward  # Update the best reward
+            print(f"Model saved successfully with reward: {total_reward:.2f}")
+
+    # Set epsilon to minimum after training for testing
+    agent.epsilon = agent.epsilon_min
 
 # Test the trained agent
 state = eval_env.reset()

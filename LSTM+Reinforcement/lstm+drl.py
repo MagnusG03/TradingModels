@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 import yfinance as yf
-from sklearn.preprocessing import MinMaxScaler, RobustScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler
 import gym
 from gym import spaces
 from stable_baselines3 import PPO
@@ -171,7 +171,7 @@ train_data['Target'] = train_data['Close_unscaled'].shift(-1)
 train_data.dropna(subset=['Target'], inplace=True)
 
 # Feature Scaling for LSTM
-lstm_scaler = MinMaxScaler()
+lstm_scaler = StandardScaler()
 lstm_scaled_data = lstm_scaler.fit_transform(train_data[['Close_unscaled', 'Target']])
 
 # Prepare sequences
@@ -190,7 +190,7 @@ X_lstm, y_lstm = create_sequences(lstm_scaled_data, seq_length)
 X_lstm = np.reshape(X_lstm, (X_lstm.shape[0], X_lstm.shape[1], 1))
 
 # Check if LSTM model exists
-lstm_model_path = './LSTM+Reinforcement/lstm_model.h5'
+lstm_model_path = './LSTM+Reinforcement/crude_oil_lstm.h5'
 if os.path.exists(lstm_model_path):
     # Load existing LSTM model
     print("Loading existing LSTM model...")
@@ -304,31 +304,17 @@ features_to_scale = features.copy()
 
 # Separate features that need special scaling
 robust_features = ['MACD']
-minmax_features = [feat for feat in features_to_scale if feat not in robust_features]
+standard_features = [feat for feat in features_to_scale if feat not in robust_features]
 
 # Feature Scaling
 
-# Apply MinMaxScaler to minmax_features
-scaler_minmax = MinMaxScaler()
-combined_data[minmax_features] = scaler_minmax.fit_transform(combined_data[minmax_features])
+# Apply StandardScaler to standard_features
+scaler_standard = StandardScaler()
+combined_data[standard_features] = scaler_standard.fit_transform(combined_data[standard_features])
 
 # Apply RobustScaler to robust_features
 scaler_robust = RobustScaler()
 combined_data[robust_features] = scaler_robust.fit_transform(combined_data[robust_features])
-
-# Verify scaling for minmax_features
-tol = 1e-6
-min_vals = combined_data[minmax_features].min()
-max_vals = combined_data[minmax_features].max()
-
-# Print min and max values for each feature
-for feature in features_to_scale:
-    min_val = combined_data[feature].min()
-    max_val = combined_data[feature].max()
-    print(f"Feature '{feature}' - min: {min_val}, max: {max_val}")
-
-# Adjusted assertion
-assert (min_vals >= -tol).all() and (max_vals <= 1 + tol).all(), "Features not scaled properly."
 
 # Custom Trading Environment for Reinforcement Learning
 
@@ -349,16 +335,6 @@ class CustomTradingEnv(gym.Env):
         # Adjust observation space limits
         obs_low = np.full(len(features), -np.inf)
         obs_high = np.full(len(features), np.inf)
-
-        # Set limits for minmax scaled features
-        for idx, feature in enumerate(features):
-            if feature in minmax_features:
-                obs_low[idx] = 0 - tol
-                obs_high[idx] = 1 + tol
-            elif feature in robust_features:
-                # Since 'MACD' is scaled using RobustScaler, set bounds based on the data
-                obs_low[idx] = combined_data[feature].min() - tol
-                obs_high[idx] = combined_data[feature].max() + tol
 
         self.observation_space = spaces.Box(low=obs_low, high=obs_high, dtype=np.float32)
 
@@ -482,7 +458,7 @@ train_env_data = combined_data.iloc[:len(train_data)].reset_index(drop=True)
 train_env = CustomTradingEnv(train_env_data, training=True)
 
 # Path to save/load the DRL agent
-agent_model_path = './LSTM+Reinforcement/ppo_agent.zip'
+agent_model_path = './LSTM+Reinforcement/crude_oil_ppo.zip'
 
 if os.path.exists(agent_model_path):
     # Load existing agent
@@ -493,7 +469,7 @@ else:
     agent = PPO('MlpPolicy', train_env, verbose=1)
 
     # Train agent
-    agent.learn(total_timesteps=3000000)
+    agent.learn(total_timesteps=300000)
 
     # Save the trained agent
     agent.save(agent_model_path)
@@ -519,7 +495,7 @@ prices = []
 profits = []
 
 # Run the agent in the environment
-for _ in range(len(test_env.df) - test_env.current_step - 1):
+while True:
     # Record the current price before stepping
     current_price = float(test_env.df.iloc[test_env.current_step]['Close_unscaled'])
     prices.append(current_price)
