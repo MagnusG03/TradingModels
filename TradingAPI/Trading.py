@@ -6,12 +6,18 @@ import yfinance as yf
 import pickle
 import json
 import time
-from tensorflow.keras.models import load_model
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import LSTM, Dense, Input, Dropout
+from tensorflow.keras.callbacks import EarlyStopping
 import oandapyV20
 import oandapyV20.endpoints.orders as orders
 import oandapyV20.endpoints.accounts as accounts
-import oandapyV20.endpoints.pricing as pricing  # Import pricing endpoint
+import oandapyV20.endpoints.pricing as pricing
 from oandapyV20.exceptions import V20Error
+
+# Suppress TensorFlow info and warning messages
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # OANDA API credentials (replace with your own)
 OANDA_API_TOKEN = '6ce0ac89b1280a778f6ac042d371886d-47fe0057cb059a6bde90da0cf91be53f'
@@ -33,8 +39,7 @@ symbol_to_instrument = {
 }
 
 save_dir = 'TrainedModels/TradingAPI'
-
-interval_seconds = 3600  # 3600 seconds = 1 hour
+os.makedirs(save_dir, exist_ok=True)  # Create the directory if it doesn't exist
 
 # Function to get account balance
 def get_account_balance(client, account_id):
@@ -65,6 +70,7 @@ def get_current_price(client, account_id, instrument):
         print(f"Error fetching current price for {instrument}: {e}")
         return None
 
+# Main trading loop
 try:
     while True:
         for symbol in symbols:
@@ -74,35 +80,16 @@ try:
                 print(f"No OANDA instrument mapping for symbol {symbol}. Skipping.")
                 continue
 
-            # Load the saved model
-            model_filename = os.path.join(save_dir, f'model_{symbol.replace("=F", "")}.h5')
-            if not os.path.exists(model_filename):
-                print(f"Model file {model_filename} not found. Skipping {symbol}.")
-                continue
-            model = load_model(model_filename)
-
-            # Load the scaler
-            scaler_filename = os.path.join(save_dir, f'scaler_{symbol}.pkl')
-            if not os.path.exists(scaler_filename):
-                print(f"Scaler file {scaler_filename} not found. Skipping {symbol}.")
-                continue
-            with open(scaler_filename, 'rb') as f:
-                scaler = pickle.load(f)
-
-            # Load the feature list
-            feature_filename = os.path.join(save_dir, f'features_{symbol}.json')
-            if not os.path.exists(feature_filename):
-                print(f"Feature file {feature_filename} not found. Skipping {symbol}.")
-                continue
-            with open(feature_filename, 'r') as f:
-                features = json.load(f)
-
-            # Get the latest data
+            # Set the date ranges
             end_date = datetime.datetime.today()
-            start_date = end_date - datetime.timedelta(days=365)  # Last 1 year
+            start_date_daily = end_date - datetime.timedelta(days=365 * 10)  # 10 years
+            start_date_hourly = end_date - datetime.timedelta(days=700)      # 700 days
+            start_date_2min = end_date - datetime.timedelta(days=50)         # 50 days
+
+            # Download daily data
             daily_data = yf.download(
                 symbol,
-                start=start_date.strftime('%Y-%m-%d'),
+                start=start_date_daily.strftime('%Y-%m-%d'),
                 end=end_date.strftime('%Y-%m-%d'),
                 interval='1d'
             )
@@ -110,14 +97,13 @@ try:
                 print(f"No daily data available for {symbol}. Skipping.")
                 continue
 
-            # Flatten MultiIndex columns if present
+            # Flatten MultiIndex columns if present in daily_data
             if isinstance(daily_data.columns, pd.MultiIndex):
                 daily_data.columns = daily_data.columns.get_level_values(0)
             daily_data.reset_index(inplace=True)
             daily_data.set_index('Date', inplace=True)
 
             # Download hourly data
-            start_date_hourly = end_date - datetime.timedelta(days=719)  # Max 720 days
             hourly_data = yf.download(
                 symbol,
                 start=start_date_hourly.strftime('%Y-%m-%d'),
@@ -139,7 +125,6 @@ try:
                     print("Datetime column not found in hourly_data.")
 
             # Download 2-minute data
-            start_date_2min = end_date - datetime.timedelta(days=59)  # Max 60 days
             data_2min = yf.download(
                 symbol,
                 start=start_date_2min.strftime('%Y-%m-%d'),
@@ -189,42 +174,100 @@ try:
             daily_data['Volatility_hourly'] = daily_data['Volatility_hourly'].ffill()
             daily_data['Volatility_2min'] = daily_data['Volatility_2min'].ffill()
 
-            # Ensure the data has the necessary features
+            daily_data = daily_data.ffill()
+            daily_data['Close'] = daily_data['Close'].astype(float)
+
             # Calculate moving averages and RSI
             daily_data['MA10'] = daily_data['Close'].rolling(window=10).mean()
             daily_data['MA50'] = daily_data['Close'].rolling(window=50).mean()
 
             window_length = 14
             delta = daily_data['Close'].diff()
-            gain = delta.where(delta > 0, 0).rolling(window_length).mean()
-            loss = -delta.where(delta < 0, 0).rolling(window_length).mean()
+            gain = delta.where(delta > 0, 0).rolling(window=window_length).mean()
+            loss = -delta.where(delta < 0, 0).rolling(window=window_length).mean()
             rs = gain / loss
             daily_data['RSI'] = 100 - (100 / (1 + rs))
 
             daily_data.fillna(0, inplace=True)
 
-            # Check for missing features
+            # Features and target variable
+            features = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA50', 'RSI', 'Volatility_hourly', 'Volatility_2min']
             missing_features = [feat for feat in features if feat not in daily_data.columns]
             if missing_features:
                 print(f"Missing features in daily_data for {symbol}: {missing_features}")
-                continue
+                features = [feat for feat in features if feat in daily_data.columns]
 
-            # Ensure that feature columns are in the correct order
-            daily_data = daily_data[features]
+            # Save the feature list for later use
+            feature_filename = os.path.join(save_dir, f'features_{symbol}.json')
+            with open(feature_filename, 'w') as f:
+                json.dump(features, f)
 
-            # Scale the data using the saved scaler
-            scaled_data = scaler.transform(daily_data)
+            scaler = MinMaxScaler(feature_range=(0, 1))
+            scaled_data = scaler.fit_transform(daily_data[features])
             scaled_df = pd.DataFrame(scaled_data, columns=features, index=daily_data.index)
+            daily_data[features] = scaled_df
 
-            # Create sequences (use the same time_steps as in training)
+            # Save the scaler
+            scaler_filename = os.path.join(save_dir, f'scaler_{symbol}.pkl')
+            with open(scaler_filename, 'wb') as f:
+                pickle.dump(scaler, f)
+
+            X = daily_data[features]
+            y = daily_data['Close'].shift(-1)
+            X = X[:-1]
+            y = y[:-1]
+
+            def create_sequences(X, y, time_steps=10):
+                Xs, ys, indices = [], [], []
+                for i in range(len(X) - time_steps):
+                    Xs.append(X.iloc[i:(i + time_steps)].values)
+                    ys.append(y.iloc[i + time_steps])
+                    indices.append(y.index[i + time_steps])
+                return np.array(Xs), np.array(ys), indices
+
             time_steps = 10
-            if len(scaled_df) < time_steps:
+            X_seq, y_seq, indices_seq = create_sequences(X, y, time_steps)
+
+            # Check if we have enough data
+            if len(X_seq) == 0:
                 print(f"Not enough data to create sequences for {symbol}. Skipping.")
                 continue
-            X = scaled_df[-time_steps:].values.reshape(1, time_steps, -1)
+
+            # Split the data
+            split = int(0.8 * len(X_seq))
+            X_train, X_test = X_seq[:split], X_seq[split:]
+            y_train, y_test = y_seq[:split], y_seq[split:]
+            indices_train, indices_test = indices_seq[:split], indices_seq[split:]
+
+            # Build and train the LSTM model
+            early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
+            model = Sequential()
+            model.add(Input(shape=(time_steps, X_train.shape[2])))
+            model.add(LSTM(128, return_sequences=True))
+            model.add(Dropout(0.2))
+            model.add(LSTM(64))
+            model.add(Dropout(0.2))
+            model.add(Dense(1))
+            model.compile(optimizer='adam', loss='mean_squared_error')
+            model.fit(
+                X_train, y_train,
+                epochs=500,
+                batch_size=32,
+                validation_split=0.1,
+                callbacks=[early_stop],
+                verbose=0  # Suppress training output for clarity
+            )
+
+            # Save the model
+            model_filename = os.path.join(save_dir, f'model_{symbol.replace("=F", "")}.h5')
+            model.save(model_filename)
+            print(f"Model for {symbol} retrained and saved as {model_filename}")
+
+            # Use the last 'time_steps' data points for prediction
+            X_input = scaled_df[-time_steps:].values.reshape(1, time_steps, -1)
 
             # Make prediction
-            prediction = model.predict(X)
+            prediction = model.predict(X_input)
 
             # Inverse transform the prediction
             # Prepare data for inverse scaling
@@ -282,9 +325,6 @@ try:
                     print(f"Error placing order for {symbol}: {e}")
             else:
                 print(f"No action for {symbol}.")
-
-        print(f"Waiting for {interval_seconds} seconds before the next check...")
-        time.sleep(interval_seconds)
 
 except KeyboardInterrupt:
     print("Script interrupted by user. Exiting.")
