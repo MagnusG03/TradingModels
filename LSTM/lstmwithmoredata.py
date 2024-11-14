@@ -166,19 +166,21 @@ X = X[:-1]
 y = y[:-1]
 
 def create_sequences(X, y, time_steps=10):
-    Xs, ys = [], []
+    Xs, ys, indices = [], [], []
     for i in range(len(X) - time_steps):
         Xs.append(X.iloc[i:(i + time_steps)].values)
         ys.append(y.iloc[i + time_steps])
-    return np.array(Xs), np.array(ys)
+        indices.append(y.index[i + time_steps])
+    return np.array(Xs), np.array(ys), indices
 
 time_steps = 10
-X_seq, y_seq = create_sequences(X, y, time_steps)
+X_seq, y_seq, indices_seq = create_sequences(X, y, time_steps)
 
 # Split the data
 split = int(0.8 * len(X_seq))
 X_train, X_test = X_seq[:split], X_seq[split:]
 y_train, y_test = y_seq[:split], y_seq[split:]
+indices_train, indices_test = indices_seq[:split], indices_seq[split:]
 
 # Build and train the LSTM model
 early_stop = EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True)
@@ -226,15 +228,34 @@ X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test_f
 rmse = np.sqrt(mean_squared_error(y_test_inv, predictions_inv))
 print(f'Root Mean Squared Error: {rmse}')
 
+# **Calculate Predicted Percentage Changes**
+expected_pct_changes = []
+for i in range(len(predictions_inv)):
+    current_price = X_test_inv_full.iloc[i]['Close']
+    predicted_price = predictions_inv[i]
+    expected_pct_change = (predicted_price - current_price) / current_price
+    expected_pct_changes.append(expected_pct_change)
+
+# **Plot Predicted Percentage Changes Over Time**
+plt.figure(figsize=(12, 6))
+plt.plot(X_test_inv_full.index, np.array(expected_pct_changes) * 100, label='Predicted Percentage Change')
+plt.title('Predicted Percentage Change Over Time')
+plt.xlabel('Date')
+plt.ylabel('Predicted Percentage Change (%)')
+plt.legend()
+plt.show()
+
 # Generate buy and sell signals with a more aggressive threshold to encourage buying and selling
 signals = []
 for i in range(len(predictions_inv)):
-    if predictions_inv[i] > X_test_inv_full.iloc[i]['Close'] * 1.15:
+    current_price = X_test_inv_full.iloc[i]['Close']
+    predicted_price = predictions_inv[i]
+    if predicted_price > current_price * 1.035:
         signals.append(2)  # Strong Buy
-    elif predictions_inv[i] > X_test_inv_full.iloc[i]['Close']:
+    elif predicted_price > current_price:
         signals.append(1)  # Buy
-    elif predictions_inv[i] < X_test_inv_full.iloc[i]['Close'] * 0.96:
-        signals.append(-1)  # Strong Sell
+    elif current_price * 0.80 <= predicted_price < current_price * 0.85:
+        signals.append(-1)  # Sell (15-20% predicted decline)
     else:
         signals.append(0)  # Hold
 
@@ -246,7 +267,7 @@ transaction_fee = 0.01  # 1% transaction fee
 
 for i in range(len(signals)):
     price = y_test_inv[i]
-    if (signals[i] == 2 or signals[i] == 1) and investment >= price:  # Buy signals
+    if (signals[i] == 2) and investment >= price:  # Buy signals
         units = investment // price
         if units > 0:
             # Deduct transaction fee from the total investment cost
