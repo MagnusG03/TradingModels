@@ -300,7 +300,11 @@ try:
                     continue
 
                 # Calculate required margin or cost for the trade
-                units = 10 if signal == 'BUY' else -10  # Positive for buy, negative for sell
+                buy_amount = 1000  # Fixed amount to buy or sell
+                units = int(np.floor(buy_amount / current_price))
+                if units == 0:
+                    units = 1
+                units = units if signal == 'BUY' else -units  # Positive for buy, negative for sell
                 required_margin = abs(units) * current_price
 
                 # Check if balance is sufficient
