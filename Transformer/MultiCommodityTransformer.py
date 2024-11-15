@@ -1,4 +1,3 @@
-# Import necessary libraries
 import pandas as pd
 import yfinance as yf
 import datetime
@@ -13,13 +12,9 @@ from tensorflow.keras.layers import (
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import matplotlib.pyplot as plt
-import ta  # For technical indicators
+import ta
 
-
-# Enable GPU usage
-print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-
-# Set date range for the last 700 days
+# Set date range
 end_date = datetime.datetime.today()
 start_date = end_date - datetime.timedelta(days=700)
 
@@ -28,7 +23,6 @@ gold_data = yf.download('GC=F', start=start_date, end=end_date, interval='1h', g
 silver_data = yf.download('SI=F', start=start_date, end=end_date, interval='1h', group_by='ticker')
 oil_data = yf.download('CL=F', start=start_date, end=end_date, interval='1h', group_by='ticker')
 
-# Reset index to ensure 'Datetime' is a column
 gold_data.reset_index(inplace=True)
 silver_data.reset_index(inplace=True)
 oil_data.reset_index(inplace=True)
@@ -56,7 +50,7 @@ gold_data.rename(columns={'Datetime_': 'Datetime'}, inplace=True)
 silver_data.rename(columns={'Datetime_': 'Datetime'}, inplace=True)
 oil_data.rename(columns={'Datetime_': 'Datetime'}, inplace=True)
 
-# Renaming columns to avoid conflicts
+# Renaming columns
 gold_data = gold_data.rename(columns={
     'GC=F_Open': 'Gold_Open',
     'GC=F_High': 'Gold_High',
@@ -148,7 +142,7 @@ scaled_df = pd.DataFrame(
 merged_data[features] = scaled_df
 
 # Prepare sequences
-sequence_length = 50  # Increased sequence length for better context
+sequence_length = 50
 
 def create_sequences(X, y, seq_length):
     Xs, ys = [], []
@@ -158,7 +152,7 @@ def create_sequences(X, y, seq_length):
     return np.array(Xs), np.array(ys)
 
 X = merged_data[features]
-y = merged_data[targets]  # Scaled prices for all commodities
+y = merged_data[targets]
 
 X_sequences, y_sequences = create_sequences(X.values, y.values, sequence_length)
 
@@ -201,15 +195,13 @@ def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout):
     x = LayerNormalization(epsilon=1e-6)(x)
     return x
 
-# Input shape: (sequence_length, num_features)
-input_shape = X_train.shape[1:]  # (sequence_length, num_features)
+input_shape = X_train.shape[1:]
 inputs = Input(shape=input_shape)
 
 # Positional Encoding
 position_encoding = positional_encoding(sequence_length, input_shape[-1])
 embedded_inputs = inputs + position_encoding
 
-# Optional: Add Conv1D layer for local feature extraction
 x = Conv1D(filters=128, kernel_size=3, padding='causal', activation='relu')(embedded_inputs)
 
 # Transformer Encoder Blocks
@@ -267,7 +259,7 @@ def inverse_transform_predictions(predictions, X_test_last, scaler, features, ta
     return predictions_inv
 
 # Inverse scaling for predictions
-X_test_last = X_test[:, -1, :]  # Get the last time step from each sequence
+X_test_last = X_test[:, -1, :]
 predictions_inv = inverse_transform_predictions(predictions, X_test_last, scaler, X.columns, targets)
 
 # Inverse scaling for y_test
@@ -305,15 +297,13 @@ def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=100
     for i in range(len(predictions_inv)):
         predicted_prices = predictions_inv[i]
         current_prices = y_test_inv[i - 1] if i > 0 else y_test_inv[i]
-        signals = predicted_prices > current_prices  # Buy if predicted price is higher
+        signals = predicted_prices > current_prices
         
-        # Sell assets where signal is False
         for idx in range(num_assets):
             if not signals[idx] and positions[idx] > 0:
                 cash += positions[idx] * y_test_inv[i, idx]
                 positions[idx] = 0
         
-        # Buy assets where signal is True
         num_signals = np.sum(signals)
         if num_signals > 0:
             investment_per_asset = cash / num_signals
@@ -326,13 +316,12 @@ def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=100
                         cash -= cost
                         positions[idx] += units
         
-        # Calculate portfolio value
         portfolio_value = cash + np.sum(positions * y_test_inv[i])
         portfolio_values.append(portfolio_value)
     
     return portfolio_values
 
-# Backtesting the unified strategy
+# Backtesting
 print("Backtesting Unified Strategy")
 portfolio_values = unified_trading_strategy(predictions_inv, y_test_inv)
 

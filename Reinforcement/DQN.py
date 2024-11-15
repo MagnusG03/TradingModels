@@ -11,16 +11,15 @@ from collections import deque
 import random
 import os
 
-# Set the date range for the last 3 days
 end_date = datetime.datetime.today()
 start_date = end_date - datetime.timedelta(days=3)
 
-# Download historical gold prices
+# Download historical prices
 gold_data = yf.download(
-    'GC=F',  # Gold futures symbol
+    'GC=F',
     start=start_date.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='2m'  # 2-minute intervals
+    interval='2m'
 )
 gold_data.reset_index(inplace=True)
 
@@ -82,16 +81,15 @@ class TradingEnv:
         self.data = data.reset_index(drop=True)
         self.features = features
         self.current_step = 0
-        self.initial_balance = 10000  # Starting balance
+        self.initial_balance = 10000
         self.balance = self.initial_balance
         self.shares_held = 0
         self.net_worth = self.initial_balance
         self.max_steps = len(self.data) - 1
         self.action_space = [0, 1, 2]  # Actions: 0 = Hold, 1 = Buy, 2 = Sell
-        self.state_size = len(self.features) + 2  # Number of features plus balance and shares held
+        self.state_size = len(self.features) + 2
 
     def reset(self):
-        # Reset the environment to initial state
         self.current_step = 0
         self.balance = self.initial_balance
         self.shares_held = 0
@@ -100,14 +98,11 @@ class TradingEnv:
         return state
 
     def _get_observation(self):
-        # Get the current state
         obs = self.data.loc[self.current_step, self.features].values.astype(np.float32)
-        # Normalize balance and include shares held
         obs = np.append(obs, [self.balance / self.initial_balance, self.shares_held])
         return obs
 
     def step(self, action):
-        # Execute one time step within the environment
         current_price = self.data.loc[self.current_step, 'Close']
         if current_price <= 1e-8:
             current_price = 1e-8
@@ -115,17 +110,14 @@ class TradingEnv:
 
         # Execute action
         if action == 1:  # Buy
-            # Buy as many shares as possible with available balance
             shares_to_buy = self.balance // (current_price * 100)
             if shares_to_buy > 0:
                 self.balance -= shares_to_buy * current_price * 100
                 self.shares_held += shares_to_buy * 100
         elif action == 2:  # Sell
-            # Sell all shares held
             if self.shares_held > 0:
                 self.balance += self.shares_held * current_price
                 self.shares_held = 0
-        # else: Hold (do nothing)
 
         self.current_step += 1
 
@@ -148,11 +140,9 @@ class ReplayBuffer:
         self.buffer = deque(maxlen=max_size)
 
     def add(self, experience):
-        # Add experience to buffer
         self.buffer.append(experience)
 
     def sample(self, batch_size):
-        # Sample a batch of experiences
         return random.sample(self.buffer, batch_size)
 
     def __len__(self):
@@ -163,7 +153,7 @@ def build_model(state_size, action_size):
     model = keras.Sequential([
         layers.Dense(64, input_dim=state_size, activation='relu'),
         layers.Dense(64, activation='relu'),
-        layers.Dense(action_size, activation='linear')  # Output layer with linear activation
+        layers.Dense(action_size, activation='linear')
     ])
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3), loss='mse')
     return model
@@ -174,36 +164,31 @@ class DQNAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.memory = ReplayBuffer()
-        self.gamma = 0.99  # Discount factor for future rewards
-        self.epsilon = 1.0  # Exploration rate (epsilon-greedy)
-        self.epsilon_decay = 0.995  # Decay rate for epsilon
-        self.epsilon_min = 0.01  # Minimum epsilon
-        self.model = build_model(state_size, action_size)  # Main network
-        self.target_model = build_model(state_size, action_size)  # Target network
-        self.update_target_model()  # Initialize target network
-        self.batch_size = 64  # Batch size for training
+        self.gamma = 0.99
+        self.epsilon = 1.0
+        self.epsilon_decay = 0.995
+        self.epsilon_min = 0.01
+        self.model = build_model(state_size, action_size)
+        self.target_model = build_model(state_size, action_size)
+        self.update_target_model()
+        self.batch_size = 64
 
     def update_target_model(self):
-        # Update target network weights
         self.target_model.set_weights(self.model.get_weights())
 
     def act(self, state):
         # Decide action based on current state
         if np.random.rand() <= self.epsilon:
-            # Explore: select a random action
             return random.choice([0, 1, 2])
-        # Exploit: select the action with max Q-value
         act_values = self.model.predict(state[np.newaxis], verbose=0)
         return np.argmax(act_values[0])
 
     def remember(self, state, action, reward, next_state, done):
-        # Store experience in replay buffer
         self.memory.add((state, action, reward, next_state, done))
 
     def replay(self):
-        # Train the model using experiences from the replay buffer
         if len(self.memory) < self.batch_size:
-            return  # Not enough samples to train
+            return
 
         minibatch = self.memory.sample(self.batch_size)
         states = np.array([e[0] for e in minibatch])
@@ -232,7 +217,7 @@ class DQNAgent:
             self.epsilon *= self.epsilon_decay
 
 # Path to save and load the model
-model_path = './TrainedModels/DRL/dqn_trading_2m_model.keras'
+model_path = './TrainedModels/DQN_Gold.keras'
 
 # Create training and evaluation environments
 train_size = int(len(gold_data) * 0.8)
@@ -252,19 +237,18 @@ if os.path.exists(model_path):
     agent = DQNAgent(state_size, action_size)
     agent.model = keras.models.load_model(model_path)
     agent.update_target_model()
-    agent.epsilon = agent.epsilon_min  # Set epsilon to minimum since we are testing
+    agent.epsilon = agent.epsilon_min
     model_loaded = True
 else:
     print("No saved model found. Initializing a new agent.")
     agent = DQNAgent(state_size, action_size)
 
-# Only train if model is not loaded
 if not model_loaded:
     # Training the agent
-    num_episodes = 50  # Number of episodes for training
-    update_target_frequency = 5  # Update target network every 5 episodes
+    num_episodes = 50
+    update_target_frequency = 5
 
-    best_reward = -float('inf')  # Initialize best reward
+    best_reward = -float('inf')
 
     for e in range(num_episodes):
         state = train_env.reset()
@@ -272,31 +256,24 @@ if not model_loaded:
         done = False
 
         while not done:
-            # Agent takes action
             action = agent.act(state)
-            # Environment responds with next state, reward, and done flag
             next_state, reward, done = train_env.step(action)
-            # Remember the experience
             agent.remember(state, action, reward, next_state, done)
             state = next_state
             total_reward += reward
 
-            # Agent learns from the experience
             agent.replay()
 
-        # Update target network
         if e % update_target_frequency == 0:
             agent.update_target_model()
 
         print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
 
-        # Save the model if the total reward is greater than the best_reward
         if total_reward > best_reward:
             agent.model.save(model_path)
-            best_reward = total_reward  # Update the best reward
+            best_reward = total_reward
             print(f"Model saved successfully with reward: {total_reward:.2f}")
 
-    # Set epsilon to minimum after training for testing
     agent.epsilon = agent.epsilon_min
 
 # Test the trained agent

@@ -10,20 +10,19 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Input
 from tensorflow.keras.callbacks import EarlyStopping
 
-# Set the date range for the last 10 years
 end_date = datetime.datetime.today()
-start_date = end_date - datetime.timedelta(days=365 * 23)
+start_date = end_date - datetime.timedelta(days=365 * 23) # 23 years
 
-# Download historical gold prices using daily data
+# Download historical prices using daily data
 gold_data = yf.download(
     'GC=F',
     start=start_date.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
-    interval='1d'  # Daily interval
+    interval='1d'
 )
 gold_data.reset_index(inplace=True)
 
-# Handle missing values and ensure data types are correct
+# Handle missing values
 gold_data.ffill(inplace=True)
 gold_data['Close'] = gold_data['Close'].astype(float)
 
@@ -88,7 +87,6 @@ predictions_full.iloc[:, col_idx] = predictions.flatten()
 predictions_inv_full = scaler.inverse_transform(predictions_full)
 predictions_inv = predictions_inv_full[:, col_idx]
 
-# Inverse transform y_test
 y_test_full = X_test.copy()
 y_test_full.iloc[:, col_idx] = y_test.values
 y_test_inv_full = scaler.inverse_transform(y_test_full)
@@ -97,7 +95,6 @@ y_test_inv = y_test_inv_full[:, col_idx]
 predictions_inv = predictions_inv.reshape(-1)
 y_test_inv = y_test_inv.reshape(-1)
 
-# Inverse transform X_test to get current 'Close' prices
 X_test_inv_full = scaler.inverse_transform(X_test)
 X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test.index)
 

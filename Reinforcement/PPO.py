@@ -1,4 +1,3 @@
-# Import necessary libraries
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -9,30 +8,24 @@ from stable_baselines3 import PPO
 import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
-
-# For checking if model files exist
 import os
 
 # Data Collection
 
-# Define the ticker symbol and date range
 ticker = 'CL=F'
 start_date = '2015-01-01'
 end_date = '2023-10-01'
 
-# Fetch historical market data using yfinance
+# Fetch historical market data
 data = yf.download(ticker, start=start_date, end=end_date)
 print("Data columns before any processing:")
 print(data.columns)
 
-# If columns are MultiIndex, drop the ticker level
 if isinstance(data.columns, pd.MultiIndex):
-    # Drop the ticker level
     data.columns = data.columns.droplevel(1)
     print("Columns after dropping ticker level:")
     print(data.columns)
 
-# Now 'Close' column is available
 close_col = 'Close'
 
 # Remove rows with non-positive 'Close' prices
@@ -41,10 +34,10 @@ data = data[data[close_col] > 0]
 # Drop rows with NaN in 'Close' prices
 data.dropna(subset=[close_col], inplace=True)
 
-# Forward fill any remaining NaN values in features (if applicable)
+# Forward fill any remaining NaN values in features
 data.fillna(method='ffill', inplace=True)
 
-data.reset_index(drop=True, inplace=True)  # Reset index after dropping rows
+data.reset_index(drop=True, inplace=True)
 
 # Verify that all 'Close' prices are positive
 assert (data[close_col] > 0).all(), "There are non-positive 'Close' prices in the data after preprocessing."
@@ -184,12 +177,11 @@ class CustomTradingEnv(gym.Env):
         # Actions: 0 = Hold, 1 = Buy, 2 = Sell
         self.action_space = spaces.Discrete(3)
 
-        # Observations: Price data and indicators
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(len(features),), dtype=np.float32)
 
         # Initialize state
         self.current_step = 0
-        self.balance = 10000.0  # Starting with $10,000
+        self.balance = 10000.0
         self.net_worth = 10000.0
         self.max_net_worth = 10000.0
         self.shares_held = 0
@@ -220,7 +212,6 @@ class CustomTradingEnv(gym.Env):
         return obs
 
     def step(self, action):
-        # Execute one time step within the environment
         current_price = float(self.df.iloc[self.current_step]['Close_unscaled'])
 
         done = False
@@ -230,15 +221,12 @@ class CustomTradingEnv(gym.Env):
             pass
 
         elif action == 1:  # Buy
-            # Calculate maximum shares we can buy considering the transaction fee
             max_shares = self.balance // (current_price * (1 + self.transaction_fee_rate))
             if max_shares > 0:
-                # Calculate the total cost including the transaction fee
                 total_cost = max_shares * current_price * (1 + self.transaction_fee_rate)
                 self.balance -= total_cost
                 prev_shares = self.shares_held
                 self.shares_held += max_shares
-                # Update cost basis to include the transaction fee
                 if prev_shares == 0:
                     self.cost_basis = current_price * (1 + self.transaction_fee_rate)
                 else:
@@ -246,7 +234,6 @@ class CustomTradingEnv(gym.Env):
 
         elif action == 2:  # Sell
             if self.shares_held > 0:
-                # Calculate the total proceeds after deducting the transaction fee
                 total_proceeds = self.shares_held * current_price * (1 - self.transaction_fee_rate)
                 self.balance += total_proceeds
                 self.total_shares_sold += self.shares_held
@@ -264,10 +251,9 @@ class CustomTradingEnv(gym.Env):
         self.net_worth = self.balance + self.shares_held * current_price
         self.max_net_worth = max(self.max_net_worth, self.net_worth)
 
-        # Calculate reward (profit or loss)
+        # Calculate reward
         reward = self.net_worth - prev_net_worth
 
-        # Append daily return for performance metrics
         daily_return = (self.net_worth - self.initial_net_worth) / self.initial_net_worth
         self.returns.append(daily_return)
 
@@ -277,7 +263,6 @@ class CustomTradingEnv(gym.Env):
         return obs, reward, done, info
 
     def render(self, mode='human', close=False):
-        # Implement render logic (optional)
         profit = self.net_worth - self.initial_net_worth
         print(f'Step: {self.current_step}')
         print(f'Balance: {self.balance}')
@@ -307,7 +292,7 @@ train_env_data = train_data.copy().reset_index(drop=True)
 train_env = CustomTradingEnv(train_env_data)
 
 # Path to save/load the DRL agent
-agent_model_path = './TrainedModels/DRL/ppo_agent.zip'
+agent_model_path = './TrainedModels/PPO_CrudeOil.zip'
 
 if os.path.exists(agent_model_path):
     # Load existing agent
@@ -343,17 +328,15 @@ actions = []
 prices = []
 profits = []
 
-# Run the agent in the environment
+# Run the agent
 while True:
-    # Record the current price before stepping
     current_price = float(test_env.df.iloc[test_env.current_step]['Close_unscaled'])
     prices.append(current_price)
 
     action, _states = agent.predict(obs)
-    action = int(action)  # Convert action from array to scalar
+    action = int(action)
     obs, reward, done, info = test_env.step(action)
 
-    # Record the variables
     net_worths.append(test_env.net_worth)
     balances.append(test_env.balance)
     held_shares.append(test_env.shares_held)

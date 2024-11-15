@@ -14,8 +14,8 @@ import os
 # Set the date ranges
 end_date = datetime.datetime.today()
 start_date_daily = end_date - datetime.timedelta(days=365 * 23)  # 23 years
-start_date_hourly = end_date - datetime.timedelta(days=719)      # 720 days
-start_date_2min = end_date - datetime.timedelta(days=59)         # 60 days
+start_date_hourly = end_date - datetime.timedelta(days=719)      # 719 days
+start_date_2min = end_date - datetime.timedelta(days=59)         # 59 days
 
 # Download daily data
 daily_data = yf.download(
@@ -68,7 +68,6 @@ else:
 
 # Function to aggregate higher-frequency data
 def aggregate_data(high_freq_data, freq):
-    # Identify available columns
     available_cols = high_freq_data.columns.tolist()
     agg_dict = {}
     if 'Open' in available_cols:
@@ -86,9 +85,7 @@ def aggregate_data(high_freq_data, freq):
         print(f"No columns to aggregate in data with frequency {freq}")
         return pd.DataFrame()  # Return empty DataFrame if no columns
 
-    # Resample to the specified frequency
     agg_data = high_freq_data.resample(freq).agg(agg_dict)
-    # Handle missing values
     agg_data.dropna(subset=['Close'], inplace=True)
     return agg_data
 
@@ -163,7 +160,7 @@ daily_data[features] = scaled_df
 
 # Use the daily_data from the LSTM code
 data = daily_data.copy()
-data.reset_index(inplace=True)  # Reset index if necessary
+data.reset_index(inplace=True)
 
 # Update the Trading Environment
 class TradingEnv:
@@ -171,13 +168,13 @@ class TradingEnv:
         self.data = data.reset_index(drop=True)
         self.features = features
         self.current_step = 0
-        self.initial_balance = 10000  # Starting balance
+        self.initial_balance = 10000
         self.balance = self.initial_balance
         self.shares_held = 0
         self.net_worth = self.initial_balance
         self.max_steps = len(self.data) - 1
-        self.action_space = [0, 1, 2]  # Actions: 0 = Hold, 1 = Buy, 2 = Sell
-        self.state_size = len(self.features) + 2  # Number of features plus balance and shares held
+        self.action_space = [0, 1, 2]
+        self.state_size = len(self.features) + 2
 
         # Initialize buy-and-hold strategy
         self.buy_hold_shares = self.initial_balance / self.data.loc[self.current_step, 'Close']
@@ -205,7 +202,6 @@ class TradingEnv:
         return obs
 
     def step(self, action):
-        # Execute one time step within the environment
         current_price = self.data.loc[self.current_step, 'Close']
         if current_price <= 1e-8:
             current_price = 1e-8
@@ -226,7 +222,6 @@ class TradingEnv:
             if self.shares_held > 0:
                 self.balance += self.shares_held * current_price
                 self.shares_held = 0
-        # else: Hold (do nothing)
 
         # Update net worth after action
         self.net_worth = self.balance + self.shares_held * current_price
@@ -265,7 +260,7 @@ def build_model(state_size, action_size):
     model = keras.Sequential([
         layers.Dense(64, input_dim=state_size, activation='relu'),
         layers.Dense(64, activation='relu'),
-        layers.Dense(action_size, activation='linear')  # Output layer with linear activation
+        layers.Dense(action_size, activation='linear')
     ])
     model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3), loss='mse')
     return model
@@ -276,14 +271,14 @@ class DQNAgent:
         self.state_size = state_size
         self.action_size = action_size
         self.memory = ReplayBuffer()
-        self.gamma = 0.99  # Discount factor for future rewards
-        self.epsilon = 1.0  # Exploration rate (epsilon-greedy)
-        self.epsilon_decay = 0.995  # Decay rate for epsilon
-        self.epsilon_min = 0.01  # Minimum epsilon
-        self.model = build_model(state_size, action_size)  # Main network
-        self.target_model = build_model(state_size, action_size)  # Target network
-        self.update_target_model()  # Initialize target network
-        self.batch_size = 32  # Batch size for training
+        self.gamma = 0.99
+        self.epsilon = 1.0
+        self.epsilon_decay = 0.995
+        self.epsilon_min = 0.01
+        self.model = build_model(state_size, action_size)
+        self.target_model = build_model(state_size, action_size)
+        self.update_target_model()
+        self.batch_size = 32
 
     def update_target_model(self):
         # Update target network weights
@@ -292,21 +287,18 @@ class DQNAgent:
     def act(self, state):
         # Decide action based on current state
         if np.random.rand() <= self.epsilon:
-            # Explore: select a random action
             return random.choice([0, 1, 2])
-        # Exploit: select the action with max Q-value
         act_values = self.model.predict(state[np.newaxis], verbose=0)
         return np.argmax(act_values[0])
 
     def remember(self, state, action, reward, next_state, done):
-        # Store experience in replay buffer
         self.memory.add((state, action, reward, next_state, done))
 
     def replay(self):
         try:
             # Train the model using experiences from the replay buffer
             if len(self.memory) < self.batch_size:
-                return  # Not enough samples to train
+                return
 
             minibatch = self.memory.sample(self.batch_size)
             states = np.array([e[0] for e in minibatch])
@@ -332,8 +324,8 @@ class DQNAgent:
         except Exception as e:
             print(f"An error occurred during replay: {e}")
 
-# Paths to save and load the model
-model_path = './TrainedModels/DRL/dqn_trading_daily_model.keras'
+# Path to save and load the model
+model_path = './TrainedModels/AdvancedDQN_CrudeOil.keras'
 
 # Create training and evaluation environments
 train_size = int(len(data) * 0.8)
@@ -379,11 +371,11 @@ if np.isinf(data[numeric_cols].values).any():
 # Only train if the model does not exist
 if not model_exists:
     # Training the agent
-    num_episodes = 500  # Increased number of episodes
-    update_target_frequency = 5  # Update target network every 5 episodes
-    reward_threshold = 0  # Adjusted reward threshold
+    num_episodes = 500
+    update_target_frequency = 5
+    reward_threshold = 0
 
-    best_reward = -float('inf')  # Initialize best reward
+    best_reward = -float('inf')
     patience = 20  # Number of episodes to wait before early stopping
     episodes_without_improvement = 0
 
@@ -394,20 +386,13 @@ if not model_exists:
             done = False
 
             while not done:
-                # Agent takes action
                 action = agent.act(state)
-                # Environment responds with next state, reward, and done flag
                 next_state, reward, done = train_env.step(action)
-                # Remember the experience
                 agent.remember(state, action, reward, next_state, done)
                 state = next_state
                 total_reward += reward
 
-                # Agent learns from the experience
                 agent.replay()
-
-                # Optional: Log step information
-                # print(f"Step info - State: {state}, Action: {action}, Reward: {reward}, Done: {done}")
 
             # Update target network
             if e % update_target_frequency == 0:

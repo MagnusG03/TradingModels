@@ -16,10 +16,9 @@ import oandapyV20.endpoints.accounts as accounts
 import oandapyV20.endpoints.pricing as pricing
 from oandapyV20.exceptions import V20Error
 
-# Suppress TensorFlow info and warning messages
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-# OANDA API credentials (replace with your own)
+# OANDA API credentials
 OANDA_API_TOKEN = '6ce0ac89b1280a778f6ac042d371886d-47fe0057cb059a6bde90da0cf91be53f'
 OANDA_ACCOUNT_ID = '101-004-30344862-001'
 
@@ -35,11 +34,11 @@ symbol_to_instrument = {
     'CL=F': 'WTICO_USD',
     'GC=F': 'XAU_USD',
     'SI=F': 'XAG_USD',
-    'HG=F': 'XCU_USD',  # Corrected instrument code for Copper
+    'HG=F': 'XCU_USD',
 }
 
-save_dir = 'TrainedModels/TradingAPI'
-os.makedirs(save_dir, exist_ok=True)  # Create the directory if it doesn't exist
+save_dir = 'TrainedModels'
+os.makedirs(save_dir, exist_ok=True)
 
 # Function to get account balance
 def get_account_balance(client, account_id):
@@ -60,7 +59,6 @@ def get_current_price(client, account_id, instrument):
     r = pricing.PricingInfo(accountID=account_id, params=params)
     try:
         rv = client.request(r)
-        # Extract the last bid and ask price
         prices = rv['prices'][0]
         bid = float(prices['bids'][0]['price'])
         ask = float(prices['asks'][0]['price'])
@@ -228,12 +226,12 @@ try:
             time_steps = 10
             X_seq, y_seq, indices_seq = create_sequences(X, y, time_steps)
 
-            # Check if we have enough data
+            # Check if enough data
             if len(X_seq) == 0:
                 print(f"Not enough data to create sequences for {symbol}. Skipping.")
                 continue
 
-            # Split the data
+            # Split data
             split = int(0.8 * len(X_seq))
             X_train, X_test = X_seq[:split], X_seq[split:]
             y_train, y_test = y_seq[:split], y_seq[split:]
@@ -255,7 +253,7 @@ try:
                 batch_size=32,
                 validation_split=0.1,
                 callbacks=[early_stop],
-                verbose=0  # Suppress training output for clarity
+                verbose=0
             )
 
             # Save the model
@@ -300,7 +298,7 @@ try:
                     continue
 
                 # Calculate required margin or cost for the trade
-                buy_amount = 1000  # Fixed amount to buy or sell
+                buy_amount = 1000  # 1000 USD
                 units = int(np.floor(buy_amount / current_price))
                 if units == 0:
                     units = 1

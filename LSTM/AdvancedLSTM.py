@@ -228,7 +228,7 @@ X_test_inv_full = pd.DataFrame(X_test_inv_full, columns=features, index=X_test_f
 rmse = np.sqrt(mean_squared_error(y_test_inv, predictions_inv))
 print(f'Root Mean Squared Error: {rmse}')
 
-# **Calculate Predicted Percentage Changes**
+# Calculate Predicted Percentage Changes
 expected_pct_changes = []
 for i in range(len(predictions_inv)):
     current_price = X_test_inv_full.iloc[i]['Close']
@@ -236,7 +236,7 @@ for i in range(len(predictions_inv)):
     expected_pct_change = (predicted_price - current_price) / current_price
     expected_pct_changes.append(expected_pct_change)
 
-# **Plot Predicted Percentage Changes Over Time**
+# Plot Predicted Percentage Changes Over Time
 plt.figure(figsize=(12, 6))
 plt.plot(X_test_inv_full.index, np.array(expected_pct_changes) * 100, label='Predicted Percentage Change')
 plt.title('Predicted Percentage Change Over Time')

@@ -1,4 +1,3 @@
-# Import necessary libraries
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -9,35 +8,29 @@ from stable_baselines3 import PPO
 import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings('ignore')
-
-# For LSTM model
 import tensorflow as tf
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
-
-import os  # For checking if model files exist
+import os
 
 # Data Collection
 
-# Define the ticker symbol and date range
 ticker = 'CL=F'
 start_date = '2015-01-01'
 end_date = '2023-10-01'
 
-# Fetch historical market data using yfinance
+# Fetch historical market data
 data = yf.download(ticker, start=start_date, end=end_date)
 print("Data columns before any processing:")
 print(data.columns)
 
 # If columns are MultiIndex, drop the ticker level
 if isinstance(data.columns, pd.MultiIndex):
-    # Drop the ticker level
     data.columns = data.columns.droplevel(1)
     print("Columns after dropping ticker level:")
     print(data.columns)
 
-# Now 'Close' column is available
 close_col = 'Close'
 
 # Remove rows with non-positive 'Close' prices
@@ -46,10 +39,10 @@ data = data[data[close_col] > 0]
 # Drop rows with NaN in 'Close' prices
 data.dropna(subset=[close_col], inplace=True)
 
-# Forward fill any remaining NaN values in features (if applicable)
+# Forward fill any remaining NaN values in features
 data.fillna(method='ffill', inplace=True)
 
-data.reset_index(drop=True, inplace=True)  # Reset index after dropping rows
+data.reset_index(drop=True, inplace=True)
 
 # Verify that all 'Close' prices are positive
 assert (data[close_col] > 0).all(), "There are non-positive 'Close' prices in the data after preprocessing."
@@ -80,12 +73,11 @@ data['MA20'] = data[close_col].rolling(window=20).mean()
 data['RSI'] = compute_RSI(data[close_col], window=14)
 data['MACD'] = compute_MACD(data[close_col])
 
-# Display the first few rows with new indicators
 print(data[['Close', 'MA20', 'RSI', 'MACD']].head(20))
 
 # Fundamental Data
 
-# Function to fetch fundamental data using yfinance
+# Function to fetch fundamental data
 def get_fundamental_data(ticker):
     stock = yf.Ticker(ticker)
     fundamental_data = {}
@@ -140,7 +132,6 @@ for col in ['PE_ratio', 'PB_ratio']:
         data.drop(columns=[col], inplace=True)
         features.remove(col)
     else:
-        # Optionally fill missing values with mean
         data[col].fillna(data[col].mean(), inplace=True)
 
 # Drop initial rows with NaNs in technical indicators
@@ -179,11 +170,11 @@ def create_sequences(data, seq_length):
     X = []
     y = []
     for i in range(len(data) - seq_length):
-        X.append(data[i:i+seq_length, 0])  # Use 'Close_unscaled' price
-        y.append(data[i+seq_length, 1])    # Use 'Target' price
+        X.append(data[i:i+seq_length, 0])
+        y.append(data[i+seq_length, 1])
     return np.array(X), np.array(y)
 
-seq_length = 60  # You can adjust this
+seq_length = 60  # Sequence length for LSTM
 X_lstm, y_lstm = create_sequences(lstm_scaled_data, seq_length)
 
 # Reshape X_lstm for LSTM input
@@ -192,11 +183,9 @@ X_lstm = np.reshape(X_lstm, (X_lstm.shape[0], X_lstm.shape[1], 1))
 # Check if LSTM model exists
 lstm_model_path = './LSTM+Reinforcement/crude_oil_lstm.h5'
 if os.path.exists(lstm_model_path):
-    # Load existing LSTM model
     print("Loading existing LSTM model...")
     lstm_model = load_model(lstm_model_path)
 else:
-    # Build and Train LSTM Model on Training Data
     lstm_model = Sequential()
     lstm_model.add(LSTM(128, return_sequences=True, input_shape=(X_lstm.shape[1], 1)))
     lstm_model.add(Dropout(0.2))
@@ -230,7 +219,6 @@ train_inverse_predictions = lstm_scaler.inverse_transform(
     np.concatenate((lstm_scaled_data[seq_length:, 0].reshape(-1,1), train_full_predictions), axis=1)
 )[:,1]
 
-# Assign predictions to lstm_predictions from index 'seq_length' onward
 train_lstm_predictions[seq_length:] = train_inverse_predictions
 
 # Add LSTM predictions to the training DataFrame
@@ -332,7 +320,6 @@ class CustomTradingEnv(gym.Env):
         # Actions: 0 = Hold, 1 = Buy, 2 = Sell
         self.action_space = spaces.Discrete(3)
 
-        # Adjust observation space limits
         obs_low = np.full(len(features), -np.inf)
         obs_high = np.full(len(features), np.inf)
 
@@ -340,7 +327,7 @@ class CustomTradingEnv(gym.Env):
 
         # Initialize state
         self.current_step = 0
-        self.balance = 10000.0  # Starting with $10,000
+        self.balance = 10000.0
         self.net_worth = 10000.0
         self.max_net_worth = 10000.0
         self.shares_held = 0
@@ -350,7 +337,6 @@ class CustomTradingEnv(gym.Env):
         self.initial_net_worth = 10000.0
         self.returns = []
 
-        # Define the transaction fee rate (1% in this case)
         self.transaction_fee_rate = 0.01  # 1% transaction fee
 
     def reset(self):
@@ -372,25 +358,20 @@ class CustomTradingEnv(gym.Env):
         return obs
 
     def step(self, action):
-        # Execute one time step within the environment
         current_price = float(self.df.iloc[self.current_step]['Close_unscaled'])
 
         done = False
 
-        # Action logic
         if action == 0:  # Hold
             pass
 
         elif action == 1:  # Buy
-            # Calculate maximum shares we can buy considering the transaction fee
             max_shares = self.balance // (current_price * (1 + self.transaction_fee_rate))
             if max_shares > 0:
-                # Calculate the total cost including the transaction fee
                 total_cost = max_shares * current_price * (1 + self.transaction_fee_rate)
                 self.balance -= total_cost
                 prev_shares = self.shares_held
                 self.shares_held += max_shares
-                # Update cost basis to include the transaction fee
                 if prev_shares == 0:
                     self.cost_basis = current_price * (1 + self.transaction_fee_rate)
                 else:
@@ -398,7 +379,6 @@ class CustomTradingEnv(gym.Env):
 
         elif action == 2:  # Sell
             if self.shares_held > 0:
-                # Calculate the total proceeds after deducting the transaction fee
                 total_proceeds = self.shares_held * current_price * (1 - self.transaction_fee_rate)
                 self.balance += total_proceeds
                 self.total_shares_sold += self.shares_held
@@ -429,7 +409,6 @@ class CustomTradingEnv(gym.Env):
         return obs, reward, done, info
 
     def render(self, mode='human', close=False):
-        # Implement render logic (optional)
         profit = self.net_worth - self.initial_net_worth
         print(f'Step: {self.current_step}')
         print(f'Balance: {self.balance}')
@@ -458,7 +437,7 @@ train_env_data = combined_data.iloc[:len(train_data)].reset_index(drop=True)
 train_env = CustomTradingEnv(train_env_data, training=True)
 
 # Path to save/load the DRL agent
-agent_model_path = './LSTM+Reinforcement/crude_oil_ppo.zip'
+agent_model_path = './TrainedModels/LSTM&PPO_CrudeOil.zip'
 
 if os.path.exists(agent_model_path):
     # Load existing agent
@@ -501,7 +480,7 @@ while True:
     prices.append(current_price)
 
     action, _states = agent.predict(obs)
-    action = int(action)  # Convert action from array to scalar
+    action = int(action)
     obs, reward, done, info = test_env.step(action)
 
     # Record the variables
