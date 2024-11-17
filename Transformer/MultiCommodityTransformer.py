@@ -287,6 +287,24 @@ for idx, commodity in enumerate(targets):
     plt.legend()
     plt.show()
 
+def buy_and_hold_with_fee(y_test_inv, initial_investment=10000, transaction_fee=0.01):
+    num_assets = y_test_inv.shape[1]
+    portfolio_values = []
+
+    investment_per_asset = initial_investment / num_assets
+    units_per_asset = np.zeros(num_assets)
+
+    for idx in range(num_assets):
+        initial_price = y_test_inv[0, idx]
+        investment_after_fee = investment_per_asset * (1 - transaction_fee)
+        units_per_asset[idx] = investment_after_fee / initial_price
+
+    for prices in y_test_inv:
+        portfolio_value = np.sum(units_per_asset * prices)
+        portfolio_values.append(portfolio_value)
+
+    return portfolio_values
+
 # Trading Strategy for Each Commodity
 def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=10000, transaction_fee=0.01):
     num_assets = predictions_inv.shape[1]
@@ -328,17 +346,24 @@ def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=100
 
     return portfolio_values
 
-# Backtesting
-print("Backtesting Unified Strategy")
+# Backtesting Buy-and-Hold Strategy
+print("Backtesting Buy-and-Hold Strategy")
+buy_and_hold_portfolio = buy_and_hold_with_fee(y_test_inv)
+
+# Backtesting Unified Trading Strategy
+print("Backtesting Unified Trading Strategy")
 portfolio_values = unified_trading_strategy(predictions_inv, y_test_inv)
 
-# Plot the portfolio value over time
 plt.figure(figsize=(14, 7))
-plt.plot(portfolio_values)
-plt.title('Unified Portfolio Value Over Time')
+plt.plot(portfolio_values, label='Unified Strategy Portfolio')
+plt.plot(buy_and_hold_portfolio, label='Buy and Hold Portfolio with Fee')
+plt.title('Portfolio Value Over Time')
 plt.xlabel('Time')
 plt.ylabel('Portfolio Value ($)')
+plt.legend()
 plt.show()
 
-# Print final portfolio value
-print(f'Final Portfolio Value: ${portfolio_values[-1]:.2f}')
+# Print final portfolio values for comparison
+print(f'Final Unified Strategy Portfolio Value: ${portfolio_values[-1]:.2f}')
+print(f'Final Buy and Hold Portfolio Value: ${buy_and_hold_portfolio[-1]:.2f}')
+

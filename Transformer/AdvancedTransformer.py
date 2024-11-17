@@ -455,10 +455,12 @@ print(f"Number of Buy signals: {num_buy_signals}")
 print(f"Number of Sell signals: {num_sell_signals}")
 print(f"Number of Hold signals: {num_hold_signals}")
 
-# Buy-and-Hold Strategy with Separate Initial Investment
+# Buy-and-Hold Strategy with Transaction Fee
+transaction_fee = 0.01
 buy_hold_investment = initial_investment
 initial_price_buy_hold = y_test_inv[0][0]
-units_buy_hold = buy_hold_investment / initial_price_buy_hold
+buy_hold_investment_after_fee = buy_hold_investment * (1 - transaction_fee)
+units_buy_hold = buy_hold_investment_after_fee / initial_price_buy_hold
 buy_hold_portfolio = units_buy_hold * y_test_inv.flatten()
 
 print(f"\nInitial price (Buy and Hold): {initial_price_buy_hold}")

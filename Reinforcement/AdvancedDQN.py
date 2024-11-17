@@ -177,9 +177,10 @@ class TradingEnv:
         self.action_space = [0, 1, 2]
         self.state_size = len(self.features) + 2
 
-        # Initialize buy-and-hold strategy
-        self.buy_hold_shares = self.initial_balance / self.data.loc[self.current_step, 'Close']
-        self.buy_hold_net_worth = self.buy_hold_shares * self.data.loc[self.current_step, 'Close']
+        # Initialize buy-and-hold strategy with transaction fee
+        initial_price = self.data.loc[self.current_step, 'Close']
+        self.buy_hold_shares = (self.initial_balance * (1 - self.transaction_fee)) / initial_price
+        self.buy_hold_net_worth = self.buy_hold_shares * initial_price
 
     def reset(self):
         # Reset the environment to initial state
@@ -188,9 +189,10 @@ class TradingEnv:
         self.shares_held = 0
         self.net_worth = self.initial_balance
 
-        # Reset buy-and-hold strategy
-        self.buy_hold_shares = self.initial_balance / self.data.loc[self.current_step, 'Close']
-        self.buy_hold_net_worth = self.buy_hold_shares * self.data.loc[self.current_step, 'Close']
+        # Reset buy-and-hold strategy with transaction fee
+        initial_price = self.data.loc[self.current_step, 'Close']
+        self.buy_hold_shares = (self.initial_balance * (1 - self.transaction_fee)) / initial_price
+        self.buy_hold_net_worth = self.buy_hold_shares * initial_price
 
         state = self._get_observation()
         return state

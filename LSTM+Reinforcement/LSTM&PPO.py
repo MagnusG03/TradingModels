@@ -16,8 +16,8 @@ import os
 
 # Data Collection
 
-ticker = 'CL=F'
-start_date = '2015-01-01'
+ticker = 'GC=F'
+start_date = '2000-01-01'
 end_date = '2023-10-01'
 
 # Fetch historical market data
@@ -181,7 +181,7 @@ X_lstm, y_lstm = create_sequences(lstm_scaled_data, seq_length)
 X_lstm = np.reshape(X_lstm, (X_lstm.shape[0], X_lstm.shape[1], 1))
 
 # Check if LSTM model exists
-lstm_model_path = './LSTM+Reinforcement/crude_oil_lstm.h5'
+lstm_model_path = './TrainedModels/LSTM&PPO_CrudeOil.h5'
 if os.path.exists(lstm_model_path):
     print("Loading existing LSTM model...")
     lstm_model = load_model(lstm_model_path)
@@ -545,9 +545,14 @@ plt.ylabel('Frequency')
 plt.show()
 
 # Compare with Buy-and-Hold Strategy
-buy_and_hold_net_worth = [test_env.initial_net_worth]
-num_shares = test_env.initial_net_worth / prices[0]
-for price in prices[1:]:
+transaction_fee_rate = 0.01
+initial_price = prices[0]
+
+initial_investment_after_fee = test_env.initial_net_worth * (1 - transaction_fee_rate)
+num_shares = initial_investment_after_fee / initial_price
+
+buy_and_hold_net_worth = []
+for price in prices:
     net_worth = num_shares * price
     buy_and_hold_net_worth.append(net_worth)
 

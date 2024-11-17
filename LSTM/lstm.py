@@ -133,7 +133,7 @@ for i in range(len(signals)):
 
 # Buy-and-hold strategy
 initial_price = y_test_inv[0]
-units_buy_hold = 10000 / initial_price
+units_buy_hold = 10000 * (1 - transaction_fee) / initial_price
 buy_hold_portfolio = units_buy_hold * y_test_inv
 
 # Plot portfolio values over time

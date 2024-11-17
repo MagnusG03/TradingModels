@@ -12,8 +12,8 @@ import os
 
 # Data Collection
 
-ticker = 'CL=F'
-start_date = '2015-01-01'
+ticker = 'GC=F'
+start_date = '2000-01-01'
 end_date = '2023-10-01'
 
 # Fetch historical market data
@@ -398,8 +398,9 @@ plt.ylabel('Frequency')
 plt.show()
 
 # Compare with Buy-and-Hold Strategy
+transaction_fee = 0.01
 buy_and_hold_net_worth = [test_env.initial_net_worth]
-num_shares = test_env.initial_net_worth / prices[0]
+num_shares = (test_env.initial_net_worth * (1 - transaction_fee)) / prices[0]
 for price in prices[1:]:
     net_worth = num_shares * price
     buy_and_hold_net_worth.append(net_worth)

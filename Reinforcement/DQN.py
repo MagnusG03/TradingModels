@@ -295,7 +295,7 @@ while not done:
 buy_hold_net_worths = []
 eval_env.reset()
 eval_env.balance = 0
-eval_env.shares_held = eval_env.initial_balance / eval_env.data.loc[0, 'Close']
+eval_env.shares_held = (eval_env.initial_balance * (1 - eval_env.transaction_fee)) / eval_env.data.loc[0, 'Close']
 
 for step in range(len(eval_env.data)):
     current_price = eval_env.data.loc[step, 'Close']
