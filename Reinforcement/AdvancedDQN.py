@@ -164,7 +164,7 @@ data.reset_index(inplace=True)
 
 # Update the Trading Environment
 class TradingEnv:
-    def __init__(self, data):
+    def __init__(self, data, transaction_fee=0.01):
         self.data = data.reset_index(drop=True)
         self.features = features
         self.current_step = 0
@@ -172,6 +172,7 @@ class TradingEnv:
         self.balance = self.initial_balance
         self.shares_held = 0
         self.net_worth = self.initial_balance
+        self.transaction_fee = transaction_fee
         self.max_steps = len(self.data) - 1
         self.action_space = [0, 1, 2]
         self.state_size = len(self.features) + 2
@@ -212,15 +213,16 @@ class TradingEnv:
 
         # Execute action
         if action == 1:  # Buy
-            # Buy as many shares as possible with available balance
             shares_to_buy = self.balance // current_price
             if shares_to_buy > 0:
-                self.balance -= shares_to_buy * current_price
-                self.shares_held += shares_to_buy
+                total_cost = shares_to_buy * current_price * (1 + self.transaction_fee)
+                if self.balance >= total_cost:
+                    self.balance -= total_cost
+                    self.shares_held += shares_to_buy
         elif action == 2:  # Sell
-            # Sell all shares held
             if self.shares_held > 0:
-                self.balance += self.shares_held * current_price
+                total_revenue = self.shares_held * current_price * (1 - self.transaction_fee)
+                self.balance += total_revenue
                 self.shares_held = 0
 
         # Update net worth after action

@@ -288,7 +288,7 @@ for idx, commodity in enumerate(targets):
     plt.show()
 
 # Trading Strategy for Each Commodity
-def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=10000):
+def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=10000, transaction_fee=0.01):
     num_assets = predictions_inv.shape[1]
     cash = initial_investment
     positions = np.zeros(num_assets)
@@ -298,12 +298,16 @@ def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=100
         predicted_prices = predictions_inv[i]
         current_prices = y_test_inv[i - 1] if i > 0 else y_test_inv[i]
         signals = predicted_prices > current_prices
-        
+
+        # Sell positions for assets with no buy signal
         for idx in range(num_assets):
             if not signals[idx] and positions[idx] > 0:
-                cash += positions[idx] * y_test_inv[i, idx]
+                sell_revenue = positions[idx] * y_test_inv[i, idx]
+                fee = transaction_fee * sell_revenue
+                cash += (sell_revenue - fee)
                 positions[idx] = 0
-        
+
+        # Determine number of assets to invest in
         num_signals = np.sum(signals)
         if num_signals > 0:
             investment_per_asset = cash / num_signals
@@ -312,13 +316,16 @@ def unified_trading_strategy(predictions_inv, y_test_inv, initial_investment=100
                     price = y_test_inv[i, idx]
                     units = investment_per_asset // price
                     cost = units * price
-                    if units > 0 and cost <= cash:
-                        cash -= cost
+                    fee = transaction_fee * cost
+                    total_cost = cost + fee
+                    if units > 0 and total_cost <= cash:
+                        cash -= total_cost
                         positions[idx] += units
-        
+
+        # Calculate portfolio value
         portfolio_value = cash + np.sum(positions * y_test_inv[i])
         portfolio_values.append(portfolio_value)
-    
+
     return portfolio_values
 
 # Backtesting

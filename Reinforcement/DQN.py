@@ -77,7 +77,7 @@ gold_data[features] = scaled_df
 
 # Custom Trading Environment
 class TradingEnv:
-    def __init__(self, data):
+    def __init__(self, data, transaction_fee=0.01):
         self.data = data.reset_index(drop=True)
         self.features = features
         self.current_step = 0
@@ -85,6 +85,7 @@ class TradingEnv:
         self.balance = self.initial_balance
         self.shares_held = 0
         self.net_worth = self.initial_balance
+        self.transaction_fee = transaction_fee
         self.max_steps = len(self.data) - 1
         self.action_space = [0, 1, 2]  # Actions: 0 = Hold, 1 = Buy, 2 = Sell
         self.state_size = len(self.features) + 2
@@ -112,11 +113,14 @@ class TradingEnv:
         if action == 1:  # Buy
             shares_to_buy = self.balance // (current_price * 100)
             if shares_to_buy > 0:
-                self.balance -= shares_to_buy * current_price * 100
-                self.shares_held += shares_to_buy * 100
+                total_cost = shares_to_buy * current_price * 100 * (1 + self.transaction_fee)
+                if self.balance >= total_cost:
+                    self.balance -= total_cost
+                    self.shares_held += shares_to_buy * 100
         elif action == 2:  # Sell
             if self.shares_held > 0:
-                self.balance += self.shares_held * current_price
+                total_revenue = self.shares_held * current_price * (1 - self.transaction_fee)
+                self.balance += total_revenue
                 self.shares_held = 0
 
         self.current_step += 1

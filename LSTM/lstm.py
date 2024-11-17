@@ -116,14 +116,18 @@ for i in range(len(predictions_inv)):
 investment = 10000
 positions = 0
 portfolio = []
+transaction_fee = 0.01
 
 for i in range(len(signals)):
     price = y_test_inv[i]
     if signals[i] == 1 and investment >= price:
-        investment -= price
-        positions += 1
+        fee = transaction_fee * price
+        if investment >= (price + fee):
+            investment -= (price + fee)
+            positions += 1
     elif signals[i] == 0 and positions > 0:
-        investment += positions * price
+        fee = transaction_fee * (positions * price)
+        investment += (positions * price - fee)
         positions = 0
     portfolio.append(investment + positions * price)
 
