@@ -10,9 +10,11 @@ from sklearn.preprocessing import MinMaxScaler
 from collections import deque
 import random
 import os
+from tqdm import tqdm
 
+# Set end and start dates for data retrieval
 end_date = datetime.datetime.today()
-start_date = end_date - datetime.timedelta(days=3)
+start_date = end_date - datetime.timedelta(days=50)
 
 # Download historical prices
 gold_data = yf.download(
@@ -31,7 +33,6 @@ else:
 
 print("Columns after flattening:", gold_data.columns)
 
-# Rename columns if necessary
 gold_data.rename(columns={
     'Datetime_': 'Datetime',
     'Adj Close_GC=F': 'Adj Close',
@@ -49,7 +50,7 @@ if 'Close' not in gold_data.columns:
     exit()
 
 # Handle missing values and ensure data types are correct
-gold_data.ffill(inplace=True)  # Forward fill missing data
+gold_data.ffill(inplace=True)
 gold_data['Close'] = gold_data['Close'].astype(float)
 
 # Calculate moving averages and RSI
@@ -83,7 +84,7 @@ class TradingEnv:
         self.current_step = 0
         self.initial_balance = 10000
         self.balance = self.initial_balance
-        self.shares_held = 0
+        self.shares_held = 0.0
         self.net_worth = self.initial_balance
         self.transaction_fee = transaction_fee
         self.max_steps = len(self.data) - 1
@@ -93,7 +94,7 @@ class TradingEnv:
     def reset(self):
         self.current_step = 0
         self.balance = self.initial_balance
-        self.shares_held = 0
+        self.shares_held = 0.0
         self.net_worth = self.initial_balance
         state = self._get_observation()
         return state
@@ -111,17 +112,17 @@ class TradingEnv:
 
         # Execute action
         if action == 1:  # Buy
-            shares_to_buy = self.balance // (current_price * 100)
+            max_shares_can_buy = self.balance / (current_price * (1 + self.transaction_fee))
+            shares_to_buy = max_shares_can_buy
             if shares_to_buy > 0:
-                total_cost = shares_to_buy * current_price * 100 * (1 + self.transaction_fee)
-                if self.balance >= total_cost:
-                    self.balance -= total_cost
-                    self.shares_held += shares_to_buy * 100
+                total_cost = shares_to_buy * current_price * (1 + self.transaction_fee)
+                self.balance -= total_cost
+                self.shares_held += shares_to_buy
         elif action == 2:  # Sell
             if self.shares_held > 0:
                 total_revenue = self.shares_held * current_price * (1 - self.transaction_fee)
                 self.balance += total_revenue
-                self.shares_held = 0
+                self.shares_held = 0.0
 
         self.current_step += 1
 
@@ -170,8 +171,8 @@ class DQNAgent:
         self.memory = ReplayBuffer()
         self.gamma = 0.99
         self.epsilon = 1.0
-        self.epsilon_decay = 0.995
         self.epsilon_min = 0.01
+        self.epsilon_decay = 0.95
         self.model = build_model(state_size, action_size)
         self.target_model = build_model(state_size, action_size)
         self.update_target_model()
@@ -181,7 +182,6 @@ class DQNAgent:
         self.target_model.set_weights(self.model.get_weights())
 
     def act(self, state):
-        # Decide action based on current state
         if np.random.rand() <= self.epsilon:
             return random.choice([0, 1, 2])
         act_values = self.model.predict(state[np.newaxis], verbose=0)
@@ -216,10 +216,6 @@ class DQNAgent:
         # Train the model
         self.model.fit(states, target, epochs=1, verbose=0)
 
-        # Decay exploration rate epsilon
-        if self.epsilon > self.epsilon_min:
-            self.epsilon *= self.epsilon_decay
-
 # Path to save and load the model
 model_path = './TrainedModels/DQN_Gold.keras'
 
@@ -233,6 +229,11 @@ eval_env = TradingEnv(eval_data)
 
 state_size = train_env.state_size
 action_size = len(train_env.action_space)
+
+# Print dataset sizes
+print(f"Total data points: {len(gold_data)}")
+print(f"Training data points: {len(train_data)}")
+print(f"Evaluation data points: {len(eval_data)}")
 
 # Load or initialize the agent
 model_loaded = False
@@ -249,7 +250,7 @@ else:
 
 if not model_loaded:
     # Training the agent
-    num_episodes = 50
+    num_episodes = 10  # Reduced number of episodes for quick testing
     update_target_frequency = 5
 
     best_reward = -float('inf')
@@ -258,22 +259,35 @@ if not model_loaded:
         state = train_env.reset()
         total_reward = 0
         done = False
+        step = 0  # Initialize step counter
 
-        while not done:
-            action = agent.act(state)
-            next_state, reward, done = train_env.step(action)
-            agent.remember(state, action, reward, next_state, done)
-            state = next_state
-            total_reward += reward
+        with tqdm(total=train_env.max_steps, desc=f"Episode {e + 1}/{num_episodes}", unit="step") as pbar:
+            while not done:
+                action = agent.act(state)
+                next_state, reward, done = train_env.step(action)
+                agent.remember(state, action, reward, next_state, done)
+                state = next_state
+                total_reward += reward
+                step += 1
 
-            agent.replay()
+                agent.replay()
+
+                # Update progress bar
+                pbar.update(1)
 
         if e % update_target_frequency == 0:
             agent.update_target_model()
 
+        # Decay epsilon at the end of each episode
+        if agent.epsilon > agent.epsilon_min:
+            agent.epsilon *= agent.epsilon_decay
+            agent.epsilon = max(agent.epsilon_min, agent.epsilon)
+
         print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
 
         if total_reward > best_reward:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
             agent.model.save(model_path)
             best_reward = total_reward
             print(f"Model saved successfully with reward: {total_reward:.2f}")
@@ -295,7 +309,8 @@ while not done:
 buy_hold_net_worths = []
 eval_env.reset()
 eval_env.balance = 0
-eval_env.shares_held = (eval_env.initial_balance * (1 - eval_env.transaction_fee)) / eval_env.data.loc[0, 'Close']
+initial_price = eval_env.data.loc[0, 'Close']
+eval_env.shares_held = (eval_env.initial_balance * (1 - eval_env.transaction_fee)) / initial_price
 
 for step in range(len(eval_env.data)):
     current_price = eval_env.data.loc[step, 'Close']

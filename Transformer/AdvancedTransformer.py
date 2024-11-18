@@ -31,7 +31,7 @@ start_date_2min = end_date - datetime.timedelta(days=58)         # 58 days
 
 # Download daily data
 daily_data = yf.download(
-    '^HSI',
+    'GC=F',
     start=start_date_daily.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='1d',
@@ -45,7 +45,7 @@ daily_data.set_index('Date', inplace=True)
 
 # Download hourly data
 hourly_data = yf.download(
-    '^HSI',
+    'GC=F',
     start=start_date_hourly.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='1h',
@@ -64,7 +64,7 @@ else:
 
 # Download 2-minute data
 data_2min = yf.download(
-    '^HSI',
+    'GC=F',
     start=start_date_2min.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='2m',

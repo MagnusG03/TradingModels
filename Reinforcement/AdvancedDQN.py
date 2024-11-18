@@ -10,6 +10,7 @@ from sklearn.preprocessing import MinMaxScaler
 from collections import deque
 import random
 import os
+from tqdm import tqdm  # For progress bar
 
 # Set the date ranges
 end_date = datetime.datetime.today()
@@ -37,7 +38,7 @@ hourly_data = yf.download(
     end=end_date.strftime('%Y-%m-%d'),
     interval='1h'
 )
-# Flatten MultiIndex columns if present
+# Flatten MultiIndex columns
 if isinstance(hourly_data.columns, pd.MultiIndex):
     hourly_data.columns = hourly_data.columns.get_level_values(0)
 hourly_data.reset_index(inplace=True)
@@ -170,37 +171,23 @@ class TradingEnv:
         self.current_step = 0
         self.initial_balance = 10000
         self.balance = self.initial_balance
-        self.shares_held = 0
+        self.shares_held = 0.0
         self.net_worth = self.initial_balance
         self.transaction_fee = transaction_fee
         self.max_steps = len(self.data) - 1
         self.action_space = [0, 1, 2]
         self.state_size = len(self.features) + 2
 
-        # Initialize buy-and-hold strategy with transaction fee
-        initial_price = self.data.loc[self.current_step, 'Close']
-        self.buy_hold_shares = (self.initial_balance * (1 - self.transaction_fee)) / initial_price
-        self.buy_hold_net_worth = self.buy_hold_shares * initial_price
-
     def reset(self):
-        # Reset the environment to initial state
         self.current_step = 0
         self.balance = self.initial_balance
-        self.shares_held = 0
+        self.shares_held = 0.0
         self.net_worth = self.initial_balance
-
-        # Reset buy-and-hold strategy with transaction fee
-        initial_price = self.data.loc[self.current_step, 'Close']
-        self.buy_hold_shares = (self.initial_balance * (1 - self.transaction_fee)) / initial_price
-        self.buy_hold_net_worth = self.buy_hold_shares * initial_price
-
         state = self._get_observation()
         return state
 
     def _get_observation(self):
-        # Get the current state
         obs = self.data.loc[self.current_step, self.features].values.astype(np.float32)
-        # Normalize balance and include shares held
         obs = np.append(obs, [self.balance / self.initial_balance, self.shares_held / 1000.0])
         return obs
 
@@ -210,22 +197,21 @@ class TradingEnv:
             current_price = 1e-8
         done = False
 
-        # Update buy-and-hold net worth
-        self.buy_hold_net_worth = self.buy_hold_shares * current_price
+        # Store previous net worth
+        prev_net_worth = self.net_worth
 
         # Execute action
         if action == 1:  # Buy
-            shares_to_buy = self.balance // current_price
+            shares_to_buy = (self.balance / (current_price * (1 + self.transaction_fee)))
             if shares_to_buy > 0:
                 total_cost = shares_to_buy * current_price * (1 + self.transaction_fee)
-                if self.balance >= total_cost:
-                    self.balance -= total_cost
-                    self.shares_held += shares_to_buy
+                self.balance -= total_cost
+                self.shares_held += shares_to_buy
         elif action == 2:  # Sell
             if self.shares_held > 0:
                 total_revenue = self.shares_held * current_price * (1 - self.transaction_fee)
                 self.balance += total_revenue
-                self.shares_held = 0
+                self.shares_held = 0.0
 
         # Update net worth after action
         self.net_worth = self.balance + self.shares_held * current_price
@@ -233,8 +219,8 @@ class TradingEnv:
         # Move to the next step
         self.current_step += 1
 
-        # Calculate reward as the difference between agent's net worth and buy-and-hold net worth
-        reward = (self.net_worth - self.buy_hold_net_worth) / self.initial_balance
+        # Calculate reward as the change in net worth
+        reward = (self.net_worth - prev_net_worth) / self.initial_balance
 
         # Check if the episode is done
         if self.current_step >= self.max_steps:
@@ -262,11 +248,11 @@ class ReplayBuffer:
 # Build the Deep Q-Network model
 def build_model(state_size, action_size):
     model = keras.Sequential([
-        layers.Dense(64, input_dim=state_size, activation='relu'),
-        layers.Dense(64, activation='relu'),
+        layers.Dense(128, input_dim=state_size, activation='relu'),
+        layers.Dense(128, activation='relu'),
         layers.Dense(action_size, activation='linear')
     ])
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3), loss='mse')
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse')
     return model
 
 # DQN Agent
@@ -282,7 +268,7 @@ class DQNAgent:
         self.model = build_model(state_size, action_size)
         self.target_model = build_model(state_size, action_size)
         self.update_target_model()
-        self.batch_size = 32
+        self.batch_size = 64
 
     def update_target_model(self):
         # Update target network weights
@@ -299,34 +285,31 @@ class DQNAgent:
         self.memory.add((state, action, reward, next_state, done))
 
     def replay(self):
-        try:
-            # Train the model using experiences from the replay buffer
-            if len(self.memory) < self.batch_size:
-                return
+        # Train the model using experiences from the replay buffer
+        if len(self.memory) < self.batch_size:
+            return
 
-            minibatch = self.memory.sample(self.batch_size)
-            states = np.array([e[0] for e in minibatch])
-            actions = np.array([e[1] for e in minibatch])
-            rewards = np.array([e[2] for e in minibatch])
-            next_states = np.array([e[3] for e in minibatch])
-            dones = np.array([e[4] for e in minibatch])
+        minibatch = self.memory.sample(self.batch_size)
+        states = np.array([e[0] for e in minibatch])
+        actions = np.array([e[1] for e in minibatch])
+        rewards = np.array([e[2] for e in minibatch])
+        next_states = np.array([e[3] for e in minibatch])
+        dones = np.array([e[4] for e in minibatch])
 
-            # Predict Q-values for current states
-            target = self.model.predict(states, verbose=0)
-            # Predict Q-values for next states using target network
-            target_next = self.target_model.predict(next_states, verbose=0)
+        # Predict Q-values for current states
+        target = self.model.predict(states, verbose=0)
+        # Predict Q-values for next states using target network
+        target_next = self.target_model.predict(next_states, verbose=0)
 
-            for i in range(self.batch_size):
-                if dones[i]:
-                    target[i][actions[i]] = rewards[i]
-                else:
-                    # Q-learning update rule
-                    target[i][actions[i]] = rewards[i] + self.gamma * np.amax(target_next[i])
+        for i in range(self.batch_size):
+            if dones[i]:
+                target[i][actions[i]] = rewards[i]
+            else:
+                # Q-learning update rule
+                target[i][actions[i]] = rewards[i] + self.gamma * np.amax(target_next[i])
 
-            # Train the model
-            self.model.fit(states, target, epochs=1, verbose=0)
-        except Exception as e:
-            print(f"An error occurred during replay: {e}")
+        # Train the model
+        self.model.fit(states, target, epochs=1, verbose=0)
 
 # Path to save and load the model
 model_path = './TrainedModels/AdvancedDQN_CrudeOil.keras'
@@ -363,10 +346,8 @@ print(f"Total data length: {len(data)}")
 print(f"Training data length: {len(train_data)}")
 print(f"Evaluation data length: {len(eval_data)}")
 
-# Select only numeric columns
-numeric_cols = data.select_dtypes(include=[np.number]).columns
-
 # Check for NaN or Inf values in numeric data
+numeric_cols = data.select_dtypes(include=[np.number]).columns
 if data[numeric_cols].isnull().values.any():
     print("Data contains NaN values.")
 if np.isinf(data[numeric_cols].values).any():
@@ -376,21 +357,30 @@ if np.isinf(data[numeric_cols].values).any():
 if not model_exists:
     # Training the agent
     num_episodes = 500
-    update_target_frequency = 5
-    reward_threshold = 0
-
+    update_target_frequency = 10
     best_reward = -float('inf')
-    patience = 20  # Number of episodes to wait before early stopping
+    patience = 20
     episodes_without_improvement = 0
 
-    try:
-        for e in range(num_episodes):
-            state = train_env.reset()
-            total_reward = 0
-            done = False
+    for e in range(num_episodes):
+        state = train_env.reset()
+        total_reward = 0
+        done = False
 
+        buy_count = 0
+        sell_count = 0
+        hold_count = 0
+
+        with tqdm(total=train_env.max_steps, desc=f"Episode {e + 1}/{num_episodes}", unit="step") as pbar:
             while not done:
                 action = agent.act(state)
+                if action == 0:
+                    hold_count += 1
+                elif action == 1:
+                    buy_count += 1
+                elif action == 2:
+                    sell_count += 1
+
                 next_state, reward, done = train_env.step(action)
                 agent.remember(state, action, reward, next_state, done)
                 state = next_state
@@ -398,44 +388,56 @@ if not model_exists:
 
                 agent.replay()
 
-            # Update target network
-            if e % update_target_frequency == 0:
-                agent.update_target_model()
+                pbar.update(1)
 
-            # Decay exploration rate epsilon
-            if agent.epsilon > agent.epsilon_min:
-                agent.epsilon *= agent.epsilon_decay
+        # Update target network
+        if e % update_target_frequency == 0:
+            agent.update_target_model()
 
-            print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.4f}")
+        # Decay exploration rate epsilon at the end of each episode
+        if agent.epsilon > agent.epsilon_min:
+            agent.epsilon *= agent.epsilon_decay
+            agent.epsilon = max(agent.epsilon_min, agent.epsilon)
 
-            # Check for improvement
-            if total_reward > best_reward:
-                best_reward = total_reward
-                episodes_without_improvement = 0
-                # Save the model if total reward has improved
-                agent.model.save(model_path)
-                print(f"Model saved successfully with reward: {total_reward:.4f}")
-            else:
-                episodes_without_improvement += 1
+        print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.4f}")
+        print(f"Actions - Buy: {buy_count}, Sell: {sell_count}, Hold: {hold_count}")
 
-            # Early stopping
-            if episodes_without_improvement >= patience:
-                print(f"No improvement for {patience} episodes. Early stopping.")
-                break
-    except Exception as e:
-        print(f"An error occurred during training: {e}")
+        # Check for improvement
+        if total_reward > best_reward:
+            best_reward = total_reward
+            episodes_without_improvement = 0
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            agent.model.save(model_path)
+            print(f"Model saved successfully with reward: {total_reward:.4f}")
+        else:
+            episodes_without_improvement += 1
+
+        # Early stopping
+        if episodes_without_improvement >= patience:
+            print(f"No improvement for {patience} episodes. Early stopping.")
+            break
 
 # Test the trained agent
 state = eval_env.reset()
 done = False
 net_worths = []
-buy_hold_net_worths = []
+initial_net_worth = eval_env.net_worth
 
 while not done:
     action = agent.act(state)
     next_state, reward, done = eval_env.step(action)
     state = next_state
     net_worths.append(eval_env.net_worth)
+
+# Buy-and-hold strategy
+eval_env.reset()
+buy_hold_net_worths = []
+while not done:
+    eval_env.current_step += 1
+    if eval_env.current_step >= eval_env.max_steps:
+        break
+    current_price = eval_env.data.loc[eval_env.current_step, 'Close']
+    eval_env.buy_hold_net_worth = (eval_env.initial_balance / current_price) * current_price
     buy_hold_net_worths.append(eval_env.buy_hold_net_worth)
 
 # Plot portfolio value over time
