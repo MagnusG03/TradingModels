@@ -15,143 +15,158 @@ from tqdm import tqdm  # For progress bar
 # Set the date ranges
 end_date = datetime.datetime.today()
 start_date_daily = end_date - datetime.timedelta(days=365 * 23)  # 23 years
-start_date_hourly = end_date - datetime.timedelta(days=719)      # 719 days
-start_date_2min = end_date - datetime.timedelta(days=59)         # 59 days
+start_date_hourly = end_date - datetime.timedelta(days=719)  # 719 days
+start_date_2min = end_date - datetime.timedelta(days=59)  # 59 days
 
 # Download daily data
 daily_data = yf.download(
-    'GC=F',
-    start=start_date_daily.strftime('%Y-%m-%d'),
-    end=end_date.strftime('%Y-%m-%d'),
-    interval='1d'
+    "GC=F",
+    start=start_date_daily.strftime("%Y-%m-%d"),
+    end=end_date.strftime("%Y-%m-%d"),
+    interval="1d",
 )
 # Flatten MultiIndex columns if present in daily_data
 if isinstance(daily_data.columns, pd.MultiIndex):
     daily_data.columns = daily_data.columns.get_level_values(0)
 daily_data.reset_index(inplace=True)
-daily_data.set_index('Date', inplace=True)
+daily_data.set_index("Date", inplace=True)
 
 # Download hourly data
 hourly_data = yf.download(
-    'GC=F',
-    start=start_date_hourly.strftime('%Y-%m-%d'),
-    end=end_date.strftime('%Y-%m-%d'),
-    interval='1h'
+    "GC=F",
+    start=start_date_hourly.strftime("%Y-%m-%d"),
+    end=end_date.strftime("%Y-%m-%d"),
+    interval="1h",
 )
 # Flatten MultiIndex columns
 if isinstance(hourly_data.columns, pd.MultiIndex):
     hourly_data.columns = hourly_data.columns.get_level_values(0)
 hourly_data.reset_index(inplace=True)
-if 'Datetime' in hourly_data.columns:
-    hourly_data.set_index('Datetime', inplace=True)
-elif 'Date' in hourly_data.columns:
-    hourly_data.set_index('Date', inplace=True)
+if "Datetime" in hourly_data.columns:
+    hourly_data.set_index("Datetime", inplace=True)
+elif "Date" in hourly_data.columns:
+    hourly_data.set_index("Date", inplace=True)
 else:
     print("Datetime column not found in hourly_data.")
 
 # Download 2-minute data
 data_2min = yf.download(
-    'GC=F',
-    start=start_date_2min.strftime('%Y-%m-%d'),
-    end=end_date.strftime('%Y-%m-%d'),
-    interval='2m'
+    "GC=F",
+    start=start_date_2min.strftime("%Y-%m-%d"),
+    end=end_date.strftime("%Y-%m-%d"),
+    interval="2m",
 )
 # Flatten MultiIndex columns if present
 if isinstance(data_2min.columns, pd.MultiIndex):
     data_2min.columns = data_2min.columns.get_level_values(0)
 data_2min.reset_index(inplace=True)
-if 'Datetime' in data_2min.columns:
-    data_2min.set_index('Datetime', inplace=True)
-elif 'Date' in data_2min.columns:
-    data_2min.set_index('Date', inplace=True)
+if "Datetime" in data_2min.columns:
+    data_2min.set_index("Datetime", inplace=True)
+elif "Date" in data_2min.columns:
+    data_2min.set_index("Date", inplace=True)
 else:
     print("Datetime column not found in data_2min.")
+
 
 # Function to aggregate higher-frequency data
 def aggregate_data(high_freq_data, freq):
     available_cols = high_freq_data.columns.tolist()
     agg_dict = {}
-    if 'Open' in available_cols:
-        agg_dict['Open'] = 'first'
-    if 'High' in available_cols:
-        agg_dict['High'] = 'max'
-    if 'Low' in available_cols:
-        agg_dict['Low'] = 'min'
-    if 'Close' in available_cols:
-        agg_dict['Close'] = 'last'
-    if 'Volume' in available_cols:
-        agg_dict['Volume'] = 'sum'
+    if "Open" in available_cols:
+        agg_dict["Open"] = "first"
+    if "High" in available_cols:
+        agg_dict["High"] = "max"
+    if "Low" in available_cols:
+        agg_dict["Low"] = "min"
+    if "Close" in available_cols:
+        agg_dict["Close"] = "last"
+    if "Volume" in available_cols:
+        agg_dict["Volume"] = "sum"
 
     if not agg_dict:
         print(f"No columns to aggregate in data with frequency {freq}")
         return pd.DataFrame()  # Return empty DataFrame if no columns
 
     agg_data = high_freq_data.resample(freq).agg(agg_dict)
-    agg_data.dropna(subset=['Close'], inplace=True)
+    agg_data.dropna(subset=["Close"], inplace=True)
     return agg_data
 
+
 # Aggregate hourly data
-agg_hourly = aggregate_data(hourly_data, 'D')
-agg_hourly = agg_hourly.loc[start_date_hourly.strftime('%Y-%m-%d'):]
+agg_hourly = aggregate_data(hourly_data, "D")
+agg_hourly = agg_hourly.loc[start_date_hourly.strftime("%Y-%m-%d") :]
 
 # Aggregate 2-minute data
-agg_2min = aggregate_data(data_2min, 'D')
-agg_2min = agg_2min.loc[start_date_2min.strftime('%Y-%m-%d'):]
+agg_2min = aggregate_data(data_2min, "D")
+agg_2min = agg_2min.loc[start_date_2min.strftime("%Y-%m-%d") :]
+
 
 # Calculate volatility from higher-frequency data
 def calculate_volatility(high_freq_data):
-    if 'Close' not in high_freq_data.columns:
+    if "Close" not in high_freq_data.columns:
         print("No 'Close' column available for volatility calculation.")
         return pd.Series(dtype=float)
-    returns = high_freq_data['Close'].pct_change()
-    volatility = returns.resample('D').std()
+    returns = high_freq_data["Close"].pct_change()
+    volatility = returns.resample("D").std()
     return volatility
 
+
 # Calculate volatility for hourly and 2-minute data
-volatility_hourly = calculate_volatility(hourly_data).rename('Volatility_hourly')
-volatility_2min = calculate_volatility(data_2min).rename('Volatility_2min')
+volatility_hourly = calculate_volatility(hourly_data).rename("Volatility_hourly")
+volatility_2min = calculate_volatility(data_2min).rename("Volatility_2min")
 
 # Convert volatility Series to DataFrame and reset index
 volatility_hourly = volatility_hourly.to_frame().reset_index()
-volatility_hourly.rename(columns={'Datetime': 'Date'}, inplace=True)
+volatility_hourly.rename(columns={"Datetime": "Date"}, inplace=True)
 
 volatility_2min = volatility_2min.to_frame().reset_index()
-volatility_2min.rename(columns={'Datetime': 'Date'}, inplace=True)
+volatility_2min.rename(columns={"Datetime": "Date"}, inplace=True)
 
 # Reset index of daily_data for merging
 daily_data.reset_index(inplace=True)
 
 # Merge higher-frequency features with daily data
-daily_data = daily_data.merge(volatility_hourly, on='Date', how='left')
-daily_data = daily_data.merge(volatility_2min, on='Date', how='left')
+daily_data = daily_data.merge(volatility_hourly, on="Date", how="left")
+daily_data = daily_data.merge(volatility_2min, on="Date", how="left")
 
 # Set 'Date' back as index
-daily_data.set_index('Date', inplace=True)
+daily_data.set_index("Date", inplace=True)
 
 # Fill missing volatility values
-daily_data['Volatility_hourly'] = daily_data['Volatility_hourly'].ffill()
-daily_data['Volatility_2min'] = daily_data['Volatility_2min'].ffill()
+daily_data["Volatility_hourly"] = daily_data["Volatility_hourly"].ffill()
+daily_data["Volatility_2min"] = daily_data["Volatility_2min"].ffill()
 
 # Handle missing values and ensure data types are correct
 daily_data.ffill(inplace=True)
-daily_data['Close'] = daily_data['Close'].astype(float)
+daily_data["Close"] = daily_data["Close"].astype(float)
 
 # Calculate moving averages and RSI
-daily_data['MA10'] = daily_data['Close'].rolling(window=10).mean()
-daily_data['MA50'] = daily_data['Close'].rolling(window=50).mean()
+daily_data["MA10"] = daily_data["Close"].rolling(window=10).mean()
+daily_data["MA50"] = daily_data["Close"].rolling(window=50).mean()
 
 window_length = 14
-delta = daily_data['Close'].diff()
+delta = daily_data["Close"].diff()
 gain = delta.where(delta > 0, 0).rolling(window=window_length).mean()
 loss = -delta.where(delta < 0, 0).rolling(window=window_length).mean()
 rs = gain / loss
-daily_data['RSI'] = 100 - (100 / (1 + rs))
+daily_data["RSI"] = 100 - (100 / (1 + rs))
 
 # Fill NaN values
 daily_data.fillna(0, inplace=True)
 
 # Features for the model
-features = ['Open', 'High', 'Low', 'Close', 'Volume', 'MA10', 'MA50', 'RSI', 'Volatility_hourly', 'Volatility_2min']
+features = [
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume",
+    "MA10",
+    "MA50",
+    "RSI",
+    "Volatility_hourly",
+    "Volatility_2min",
+]
 
 # Scale the features between 0 and 1
 scaler = MinMaxScaler(feature_range=(0, 1))
@@ -162,6 +177,7 @@ daily_data[features] = scaled_df
 # Use the daily_data from the LSTM code
 data = daily_data.copy()
 data.reset_index(inplace=True)
+
 
 # Update the Trading Environment
 class TradingEnv:
@@ -188,11 +204,13 @@ class TradingEnv:
 
     def _get_observation(self):
         obs = self.data.loc[self.current_step, self.features].values.astype(np.float32)
-        obs = np.append(obs, [self.balance / self.initial_balance, self.shares_held / 1000.0])
+        obs = np.append(
+            obs, [self.balance / self.initial_balance, self.shares_held / 1000.0]
+        )
         return obs
 
     def step(self, action):
-        current_price = self.data.loc[self.current_step, 'Close']
+        current_price = self.data.loc[self.current_step, "Close"]
         if current_price <= 1e-8:
             current_price = 1e-8
         done = False
@@ -202,14 +220,16 @@ class TradingEnv:
 
         # Execute action
         if action == 1:  # Buy
-            shares_to_buy = (self.balance / (current_price * (1 + self.transaction_fee)))
+            shares_to_buy = self.balance / (current_price * (1 + self.transaction_fee))
             if shares_to_buy > 0:
                 total_cost = shares_to_buy * current_price * (1 + self.transaction_fee)
                 self.balance -= total_cost
                 self.shares_held += shares_to_buy
         elif action == 2:  # Sell
             if self.shares_held > 0:
-                total_revenue = self.shares_held * current_price * (1 - self.transaction_fee)
+                total_revenue = (
+                    self.shares_held * current_price * (1 - self.transaction_fee)
+                )
                 self.balance += total_revenue
                 self.shares_held = 0.0
 
@@ -229,6 +249,7 @@ class TradingEnv:
         next_state = self._get_observation()
         return next_state, reward, done
 
+
 # Add the ReplayBuffer class
 class ReplayBuffer:
     def __init__(self, max_size=100000):
@@ -245,15 +266,19 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
+
 # Build the Deep Q-Network model
 def build_model(state_size, action_size):
-    model = keras.Sequential([
-        layers.Dense(128, input_dim=state_size, activation='relu'),
-        layers.Dense(128, activation='relu'),
-        layers.Dense(action_size, activation='linear')
-    ])
-    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss='mse')
+    model = keras.Sequential(
+        [
+            layers.Dense(128, input_dim=state_size, activation="relu"),
+            layers.Dense(128, activation="relu"),
+            layers.Dense(action_size, activation="linear"),
+        ]
+    )
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-4), loss="mse")
     return model
+
 
 # DQN Agent
 class DQNAgent:
@@ -306,13 +331,16 @@ class DQNAgent:
                 target[i][actions[i]] = rewards[i]
             else:
                 # Q-learning update rule
-                target[i][actions[i]] = rewards[i] + self.gamma * np.amax(target_next[i])
+                target[i][actions[i]] = rewards[i] + self.gamma * np.amax(
+                    target_next[i]
+                )
 
         # Train the model
         self.model.fit(states, target, epochs=1, verbose=0)
 
+
 # Path to save and load the model
-model_path = './TrainedModels/AdvancedDQN_Gold.keras'
+model_path = "./TrainedModels/AdvancedDQN_Gold.keras"
 
 # Create training and evaluation environments
 train_size = int(len(data) * 0.8)
@@ -358,7 +386,7 @@ if not model_exists:
     # Training the agent
     num_episodes = 500
     update_target_frequency = 10
-    best_reward = -float('inf')
+    best_reward = -float("inf")
     patience = 20
     episodes_without_improvement = 0
 
@@ -371,7 +399,11 @@ if not model_exists:
         sell_count = 0
         hold_count = 0
 
-        with tqdm(total=train_env.max_steps, desc=f"Episode {e + 1}/{num_episodes}", unit="step") as pbar:
+        with tqdm(
+            total=train_env.max_steps,
+            desc=f"Episode {e + 1}/{num_episodes}",
+            unit="step",
+        ) as pbar:
             while not done:
                 action = agent.act(state)
                 if action == 0:
@@ -399,7 +431,9 @@ if not model_exists:
             agent.epsilon *= agent.epsilon_decay
             agent.epsilon = max(agent.epsilon_min, agent.epsilon)
 
-        print(f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.4f}")
+        print(
+            f"Episode {e + 1}/{num_episodes}, Total Reward: {total_reward:.4f}, Epsilon: {agent.epsilon:.4f}"
+        )
         print(f"Actions - Buy: {buy_count}, Sell: {sell_count}, Hold: {hold_count}")
 
         # Check for improvement
@@ -431,25 +465,27 @@ while not done:
 
 # Buy-and-hold strategy
 eval_env.reset()
-initial_price = eval_env.data.loc[0, 'Close']
-buy_hold_shares = (eval_env.initial_balance * (1 - eval_env.transaction_fee)) / initial_price
+initial_price = eval_env.data.loc[0, "Close"]
+buy_hold_shares = (
+    eval_env.initial_balance * (1 - eval_env.transaction_fee)
+) / initial_price
 buy_hold_net_worths = []
 
 for step in range(eval_env.max_steps):
-    current_price = eval_env.data.loc[step, 'Close']
+    current_price = eval_env.data.loc[step, "Close"]
     net_worth = buy_hold_shares * current_price
     buy_hold_net_worths.append(net_worth)
 
 # Plot portfolio value over time
 plt.figure(figsize=(12, 6))
-plt.plot(net_worths, label='Agent Portfolio Value')
-plt.plot(buy_hold_net_worths, label='Buy and Hold Portfolio Value')
-plt.title('Portfolio Value Comparison')
-plt.xlabel('Time Steps')
-plt.ylabel('Portfolio Value ($)')
+plt.plot(net_worths, label="Agent Portfolio Value")
+plt.plot(buy_hold_net_worths, label="Buy and Hold Portfolio Value")
+plt.title("Portfolio Value Comparison")
+plt.xlabel("Time Steps")
+plt.ylabel("Portfolio Value ($)")
 plt.legend()
 plt.show()
 
 # Print final results
-print(f'Final Agent Net Worth: ${net_worths[-1]:.2f}')
-print(f'Final Buy and Hold Net Worth: ${buy_hold_net_worths[-1]:.2f}')
+print(f"Final Agent Net Worth: ${net_worths[-1]:.2f}")
+print(f"Final Buy and Hold Net Worth: ${buy_hold_net_worths[-1]:.2f}")

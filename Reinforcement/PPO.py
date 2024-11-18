@@ -7,14 +7,15 @@ from gym import spaces
 from stable_baselines3 import PPO
 import matplotlib.pyplot as plt
 import warnings
-warnings.filterwarnings('ignore')
+
+warnings.filterwarnings("ignore")
 import os
 
 # Data Collection
 
-ticker = 'GC=F'
-start_date = '2000-01-01'
-end_date = '2023-10-01'
+ticker = "GC=F"
+start_date = "2000-01-01"
+end_date = "2023-10-01"
 
 # Fetch historical market data
 data = yf.download(ticker, start=start_date, end=end_date)
@@ -26,7 +27,7 @@ if isinstance(data.columns, pd.MultiIndex):
     print("Columns after dropping ticker level:")
     print(data.columns)
 
-close_col = 'Close'
+close_col = "Close"
 
 # Remove rows with non-positive 'Close' prices
 data = data[data[close_col] > 0]
@@ -35,14 +36,17 @@ data = data[data[close_col] > 0]
 data.dropna(subset=[close_col], inplace=True)
 
 # Forward fill any remaining NaN values in features
-data.fillna(method='ffill', inplace=True)
+data.fillna(method="ffill", inplace=True)
 
 data.reset_index(drop=True, inplace=True)
 
 # Verify that all 'Close' prices are positive
-assert (data[close_col] > 0).all(), "There are non-positive 'Close' prices in the data after preprocessing."
+assert (
+    data[close_col] > 0
+).all(), "There are non-positive 'Close' prices in the data after preprocessing."
 
 # Technical Indicators
+
 
 # Function to compute Relative Strength Index (RSI)
 def compute_RSI(series, window=14):
@@ -55,6 +59,7 @@ def compute_RSI(series, window=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+
 # Function to compute Moving Average Convergence Divergence (MACD)
 def compute_MACD(series, fast=12, slow=26, signal=9):
     exp1 = series.ewm(span=fast, adjust=False).mean()
@@ -64,14 +69,16 @@ def compute_MACD(series, fast=12, slow=26, signal=9):
     macd_histogram = macd - signal_line
     return macd_histogram
 
-data['MA20'] = data[close_col].rolling(window=20).mean()
-data['RSI'] = compute_RSI(data[close_col], window=14)
-data['MACD'] = compute_MACD(data[close_col])
+
+data["MA20"] = data[close_col].rolling(window=20).mean()
+data["RSI"] = compute_RSI(data[close_col], window=14)
+data["MACD"] = compute_MACD(data[close_col])
 
 # Display the first few rows with new indicators
-print(data[['Close', 'MA20', 'RSI', 'MACD']].head(20))
+print(data[["Close", "MA20", "RSI", "MACD"]].head(20))
 
 # Fundamental Data
+
 
 # Function to fetch fundamental data using yfinance
 def get_fundamental_data(ticker):
@@ -79,25 +86,26 @@ def get_fundamental_data(ticker):
     fundamental_data = {}
     # Get PE ratio
     try:
-        pe_ratio = stock.info.get('trailingPE', np.nan)
+        pe_ratio = stock.info.get("trailingPE", np.nan)
     except KeyError:
         pe_ratio = np.nan
-    fundamental_data['PE_ratio'] = pe_ratio
+    fundamental_data["PE_ratio"] = pe_ratio
     # Get Price to Book ratio
     try:
-        pb_ratio = stock.info.get('priceToBook', np.nan)
+        pb_ratio = stock.info.get("priceToBook", np.nan)
     except KeyError:
         pb_ratio = np.nan
-    fundamental_data['PB_ratio'] = pb_ratio
+    fundamental_data["PB_ratio"] = pb_ratio
     # Get Dividend Yield
     try:
-        dividend_yield = stock.info.get('dividendYield', np.nan)
+        dividend_yield = stock.info.get("dividendYield", np.nan)
     except KeyError:
         dividend_yield = np.nan
-    fundamental_data['Dividend_Yield'] = dividend_yield
+    fundamental_data["Dividend_Yield"] = dividend_yield
     # Convert to DataFrame
     fundamental_df = pd.DataFrame(fundamental_data, index=[0])
     return fundamental_df
+
 
 # Fetch fundamental data
 fundamental_data = get_fundamental_data(ticker)
@@ -112,18 +120,18 @@ print(data.head())
 # Data Preprocessing
 
 # Define the features list before using it
-features = ['Close', 'MA20', 'RSI', 'MACD', 'PE_ratio', 'PB_ratio', 'Dividend_Yield']
+features = ["Close", "MA20", "RSI", "MACD", "PE_ratio", "PB_ratio", "Dividend_Yield"]
 
 # Update 'Close' in features to match the actual column name
-features[features.index('Close')] = close_col
+features[features.index("Close")] = close_col
 
 # Remove 'Dividend_Yield' if it's entirely NaN
-if data['Dividend_Yield'].isna().all():
-    data.drop(columns=['Dividend_Yield'], inplace=True)
-    features.remove('Dividend_Yield')
+if data["Dividend_Yield"].isna().all():
+    data.drop(columns=["Dividend_Yield"], inplace=True)
+    features.remove("Dividend_Yield")
 
 # Remove 'PE_ratio' and 'PB_ratio' if they are entirely NaN
-for col in ['PE_ratio', 'PB_ratio']:
+for col in ["PE_ratio", "PB_ratio"]:
     if data[col].isna().all():
         data.drop(columns=[col], inplace=True)
         features.remove(col)
@@ -132,7 +140,7 @@ for col in ['PE_ratio', 'PB_ratio']:
         data[col].fillna(data[col].mean(), inplace=True)
 
 # Drop initial rows with NaNs in technical indicators
-data.dropna(subset=['MA20', 'RSI', 'MACD'], inplace=True)
+data.dropna(subset=["MA20", "RSI", "MACD"], inplace=True)
 
 # Now drop any remaining rows with NaNs in the features
 data.dropna(subset=features, inplace=True)
@@ -141,7 +149,7 @@ data.dropna(subset=features, inplace=True)
 data.reset_index(drop=True, inplace=True)
 
 # Keep a copy of the unscaled 'Close' price
-data['Close_unscaled'] = data[close_col]
+data["Close_unscaled"] = data[close_col]
 
 # Split the Data into Training and Testing Sets
 split_index = int(len(data) * 0.8)  # 80% training, 20% testing
@@ -152,7 +160,7 @@ test_data = data.iloc[split_index:].reset_index(drop=True)
 
 # Feature Scaling
 # Exclude 'Close_unscaled' from scaling
-features_to_scale = [feature for feature in features if feature != 'Close_unscaled']
+features_to_scale = [feature for feature in features if feature != "Close_unscaled"]
 
 # Use StandardScaler for scaling
 scaler = StandardScaler()
@@ -164,9 +172,11 @@ test_data[features_to_scale] = scaler.transform(test_data[features_to_scale])
 
 # Custom Trading Environment for Reinforcement Learning
 
+
 class CustomTradingEnv(gym.Env):
     """A custom trading environment for reinforcement learning"""
-    metadata = {'render.modes': ['human']}
+
+    metadata = {"render.modes": ["human"]}
 
     def __init__(self, df):
         super(CustomTradingEnv, self).__init__()
@@ -177,7 +187,9 @@ class CustomTradingEnv(gym.Env):
         # Actions: 0 = Hold, 1 = Buy, 2 = Sell
         self.action_space = spaces.Discrete(3)
 
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(len(features),), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=-np.inf, high=np.inf, shape=(len(features),), dtype=np.float32
+        )
 
         # Initialize state
         self.current_step = 0
@@ -208,11 +220,11 @@ class CustomTradingEnv(gym.Env):
         return self._next_observation()
 
     def _next_observation(self):
-        obs = self.df.iloc[self.current_step][features].astype('float32').values
+        obs = self.df.iloc[self.current_step][features].astype("float32").values
         return obs
 
     def step(self, action):
-        current_price = float(self.df.iloc[self.current_step]['Close_unscaled'])
+        current_price = float(self.df.iloc[self.current_step]["Close_unscaled"])
 
         done = False
 
@@ -221,20 +233,29 @@ class CustomTradingEnv(gym.Env):
             pass
 
         elif action == 1:  # Buy
-            max_shares = self.balance // (current_price * (1 + self.transaction_fee_rate))
+            max_shares = self.balance // (
+                current_price * (1 + self.transaction_fee_rate)
+            )
             if max_shares > 0:
-                total_cost = max_shares * current_price * (1 + self.transaction_fee_rate)
+                total_cost = (
+                    max_shares * current_price * (1 + self.transaction_fee_rate)
+                )
                 self.balance -= total_cost
                 prev_shares = self.shares_held
                 self.shares_held += max_shares
                 if prev_shares == 0:
                     self.cost_basis = current_price * (1 + self.transaction_fee_rate)
                 else:
-                    self.cost_basis = ((self.cost_basis * prev_shares) + (current_price * (1 + self.transaction_fee_rate) * max_shares)) / self.shares_held
+                    self.cost_basis = (
+                        (self.cost_basis * prev_shares)
+                        + (current_price * (1 + self.transaction_fee_rate) * max_shares)
+                    ) / self.shares_held
 
         elif action == 2:  # Sell
             if self.shares_held > 0:
-                total_proceeds = self.shares_held * current_price * (1 - self.transaction_fee_rate)
+                total_proceeds = (
+                    self.shares_held * current_price * (1 - self.transaction_fee_rate)
+                )
                 self.balance += total_proceeds
                 self.total_shares_sold += self.shares_held
                 self.total_sales_value += total_proceeds
@@ -254,32 +275,43 @@ class CustomTradingEnv(gym.Env):
         # Calculate reward
         reward = self.net_worth - prev_net_worth
 
-        daily_return = (self.net_worth - self.initial_net_worth) / self.initial_net_worth
+        daily_return = (
+            self.net_worth - self.initial_net_worth
+        ) / self.initial_net_worth
         self.returns.append(daily_return)
 
         # Return step information
-        obs = self._next_observation() if not done else np.zeros(self.observation_space.shape)
+        obs = (
+            self._next_observation()
+            if not done
+            else np.zeros(self.observation_space.shape)
+        )
         info = {}
         return obs, reward, done, info
 
-    def render(self, mode='human', close=False):
+    def render(self, mode="human", close=False):
         profit = self.net_worth - self.initial_net_worth
-        print(f'Step: {self.current_step}')
-        print(f'Balance: {self.balance}')
-        print(f'Shares held: {self.shares_held}')
-        print(f'Net worth: {self.net_worth}')
-        print(f'Profit: {profit}')
+        print(f"Step: {self.current_step}")
+        print(f"Balance: {self.balance}")
+        print(f"Shares held: {self.shares_held}")
+        print(f"Net worth: {self.net_worth}")
+        print(f"Profit: {profit}")
 
     def get_portfolio_performance(self):
-        total_return = (self.net_worth - self.initial_net_worth) / self.initial_net_worth
+        total_return = (
+            self.net_worth - self.initial_net_worth
+        ) / self.initial_net_worth
         max_drawdown = (self.max_net_worth - self.net_worth) / self.max_net_worth
         returns = pd.Series(self.returns)
-        sharpe_ratio = returns.mean() / returns.std() * np.sqrt(252) if returns.std() != 0 else 0
+        sharpe_ratio = (
+            returns.mean() / returns.std() * np.sqrt(252) if returns.std() != 0 else 0
+        )
         return {
-            'total_return': total_return,
-            'max_drawdown': max_drawdown,
-            'sharpe_ratio': sharpe_ratio
+            "total_return": total_return,
+            "max_drawdown": max_drawdown,
+            "sharpe_ratio": sharpe_ratio,
         }
+
 
 # Initialize Environment and Agent
 
@@ -292,7 +324,7 @@ train_env_data = train_data.copy().reset_index(drop=True)
 train_env = CustomTradingEnv(train_env_data)
 
 # Path to save/load the DRL agent
-agent_model_path = './TrainedModels/PPO_Gold.zip'
+agent_model_path = "./TrainedModels/PPO_Gold.zip"
 
 if os.path.exists(agent_model_path):
     # Load existing agent
@@ -300,7 +332,7 @@ if os.path.exists(agent_model_path):
     agent = PPO.load(agent_model_path, env=train_env)
 else:
     # Initialize agent
-    agent = PPO('MlpPolicy', train_env, verbose=1)
+    agent = PPO("MlpPolicy", train_env, verbose=1)
 
     # Train agent
     agent.learn(total_timesteps=300000)
@@ -330,7 +362,7 @@ profits = []
 
 # Run the agent
 while True:
-    current_price = float(test_env.df.iloc[test_env.current_step]['Close_unscaled'])
+    current_price = float(test_env.df.iloc[test_env.current_step]["Close_unscaled"])
     prices.append(current_price)
 
     action, _states = agent.predict(obs)
@@ -353,48 +385,50 @@ print(f"Maximum Drawdown: {portfolio_performance['max_drawdown'] * 100:.2f}%")
 print(f"Sharpe Ratio: {portfolio_performance['sharpe_ratio']:.2f}")
 
 # Plot Net Worth Over Time
-plt.figure(figsize=(12,6))
-plt.plot(net_worths, label='Net Worth')
-plt.title('Net Worth Over Time')
-plt.xlabel('Time Step')
-plt.ylabel('Net Worth ($)')
+plt.figure(figsize=(12, 6))
+plt.plot(net_worths, label="Net Worth")
+plt.title("Net Worth Over Time")
+plt.xlabel("Time Step")
+plt.ylabel("Net Worth ($)")
 plt.legend()
 plt.show()
 
 # Plot Balance and Equity Curve
-plt.figure(figsize=(12,6))
-plt.plot(balances, label='Balance')
+plt.figure(figsize=(12, 6))
+plt.plot(balances, label="Balance")
 equity = [net_worths[i] - balances[i] for i in range(len(balances))]
-plt.plot(equity, label='Equity in Shares')
-plt.title('Balance and Equity Over Time')
-plt.xlabel('Time Step')
-plt.ylabel('Amount ($)')
+plt.plot(equity, label="Equity in Shares")
+plt.title("Balance and Equity Over Time")
+plt.xlabel("Time Step")
+plt.ylabel("Amount ($)")
 plt.legend()
 plt.show()
 
 # Plot Actions Over Time
-action_dict = {0: 'Hold', 1: 'Buy', 2: 'Sell'}
+action_dict = {0: "Hold", 1: "Buy", 2: "Sell"}
 action_names = [action_dict[a] for a in actions]
 
-plt.figure(figsize=(12,6))
-plt.plot(prices, label='Price')
+plt.figure(figsize=(12, 6))
+plt.plot(prices, label="Price")
 buy_signals = [prices[i] if actions[i] == 1 else np.nan for i in range(len(actions))]
 sell_signals = [prices[i] if actions[i] == 2 else np.nan for i in range(len(actions))]
-plt.scatter(range(len(actions)), buy_signals, marker='^', color='g', label='Buy Signal')
-plt.scatter(range(len(actions)), sell_signals, marker='v', color='r', label='Sell Signal')
-plt.title('Trading Actions Over Time')
-plt.xlabel('Time Step')
-plt.ylabel('Price ($)')
+plt.scatter(range(len(actions)), buy_signals, marker="^", color="g", label="Buy Signal")
+plt.scatter(
+    range(len(actions)), sell_signals, marker="v", color="r", label="Sell Signal"
+)
+plt.title("Trading Actions Over Time")
+plt.xlabel("Time Step")
+plt.ylabel("Price ($)")
 plt.legend()
 plt.show()
 
 # Plot Returns Distribution
 returns = pd.Series(test_env.returns)
-plt.figure(figsize=(10,5))
-plt.hist(returns, bins=50, edgecolor='black')
-plt.title('Distribution of Daily Returns')
-plt.xlabel('Daily Return')
-plt.ylabel('Frequency')
+plt.figure(figsize=(10, 5))
+plt.hist(returns, bins=50, edgecolor="black")
+plt.title("Distribution of Daily Returns")
+plt.xlabel("Daily Return")
+plt.ylabel("Frequency")
 plt.show()
 
 # Compare with Buy-and-Hold Strategy
@@ -405,11 +439,11 @@ for price in prices[1:]:
     net_worth = num_shares * price
     buy_and_hold_net_worth.append(net_worth)
 
-plt.figure(figsize=(12,6))
-plt.plot(net_worths, label='Agent Net Worth')
-plt.plot(buy_and_hold_net_worth, label='Buy and Hold Net Worth')
-plt.title('Agent vs Buy and Hold Strategy')
-plt.xlabel('Time Step')
-plt.ylabel('Net Worth ($)')
+plt.figure(figsize=(12, 6))
+plt.plot(net_worths, label="Agent Net Worth")
+plt.plot(buy_and_hold_net_worth, label="Buy and Hold Net Worth")
+plt.title("Agent vs Buy and Hold Strategy")
+plt.xlabel("Time Step")
+plt.ylabel("Net Worth ($)")
 plt.legend()
 plt.show()
