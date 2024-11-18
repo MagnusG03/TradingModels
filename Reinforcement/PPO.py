@@ -292,7 +292,7 @@ train_env_data = train_data.copy().reset_index(drop=True)
 train_env = CustomTradingEnv(train_env_data)
 
 # Path to save/load the DRL agent
-agent_model_path = './TrainedModels/PPO_CrudeOil.zip'
+agent_model_path = './TrainedModels/PPO_Gold.zip'
 
 if os.path.exists(agent_model_path):
     # Load existing agent

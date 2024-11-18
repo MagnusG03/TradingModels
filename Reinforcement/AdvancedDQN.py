@@ -20,7 +20,7 @@ start_date_2min = end_date - datetime.timedelta(days=59)         # 59 days
 
 # Download daily data
 daily_data = yf.download(
-    'CL=F',
+    'GC=F',
     start=start_date_daily.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='1d'
@@ -33,7 +33,7 @@ daily_data.set_index('Date', inplace=True)
 
 # Download hourly data
 hourly_data = yf.download(
-    'CL=F',
+    'GC=F',
     start=start_date_hourly.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='1h'
@@ -51,7 +51,7 @@ else:
 
 # Download 2-minute data
 data_2min = yf.download(
-    'CL=F',
+    'GC=F',
     start=start_date_2min.strftime('%Y-%m-%d'),
     end=end_date.strftime('%Y-%m-%d'),
     interval='2m'
@@ -312,7 +312,7 @@ class DQNAgent:
         self.model.fit(states, target, epochs=1, verbose=0)
 
 # Path to save and load the model
-model_path = './TrainedModels/AdvancedDQN_CrudeOil.keras'
+model_path = './TrainedModels/AdvancedDQN_Gold.keras'
 
 # Create training and evaluation environments
 train_size = int(len(data) * 0.8)
@@ -431,14 +431,14 @@ while not done:
 
 # Buy-and-hold strategy
 eval_env.reset()
+initial_price = eval_env.data.loc[0, 'Close']
+buy_hold_shares = (eval_env.initial_balance * (1 - eval_env.transaction_fee)) / initial_price
 buy_hold_net_worths = []
-while not done:
-    eval_env.current_step += 1
-    if eval_env.current_step >= eval_env.max_steps:
-        break
-    current_price = eval_env.data.loc[eval_env.current_step, 'Close']
-    eval_env.buy_hold_net_worth = (eval_env.initial_balance / current_price) * current_price
-    buy_hold_net_worths.append(eval_env.buy_hold_net_worth)
+
+for step in range(eval_env.max_steps):
+    current_price = eval_env.data.loc[step, 'Close']
+    net_worth = buy_hold_shares * current_price
+    buy_hold_net_worths.append(net_worth)
 
 # Plot portfolio value over time
 plt.figure(figsize=(12, 6))
